@@ -1,0 +1,194 @@
+# Development Guide
+
+This guide covers how to develop and maintain nwvault-legacy.
+
+## Getting Started
+
+### Prerequisites
+- Python 3.14+
+- UV package manager
+
+### Setup
+```bash
+# Clone and enter the project
+cd nwvault-legacy
+
+# Install dependencies
+uv sync
+
+# Copy environment template
+cp .env.example .env
+
+# Start development server
+make run
+```
+
+## Development Commands
+
+### Running the Application
+```bash
+make run          # Start with Docker
+```
+
+### Health Monitoring
+```bash
+make health         # Check system health
+make health-detailed # Detailed health information
+make health-json    # JSON health output
+```
+
+### Code Quality
+```bash
+make test           # Run test suite
+make lint           # Check code style
+make typecheck      # Run type checking
+make check          # Run all checks
+make fix            # Auto-fix code issues
+```
+
+### Documentation
+```bash
+make docs-serve     # Serve documentation locally (http://localhost:8001)
+make docs-build     # Build static documentation
+```
+
+## Project Structure
+
+```
+nwvault-legacy/
+├── app/
+│   ├── components/     # Application components
+│   │   ├── backend/    # FastAPI web server
+│   │   ├── frontend/   # Flet user interface
+│   │   └── worker/     # Background task workers (arq)
+│   ├── core/          # Core utilities and configuration
+│   ├── services/      # Business logic services
+│   └── cli/           # Command-line interface
+├── tests/             # Test suite
+├── docs/              # Project documentation
+└── docker-compose.yml # Container orchestration
+```
+
+## Adding New Features
+
+### 1. Create Business Logic
+Add pure business logic functions to `app/services/`:
+
+```python
+# app/services/my_service.py
+async def process_data(data: str) -> str:
+    """Process data and return result."""
+    return f"Processed: {data}"
+```
+
+### 2. Add API Endpoints
+Create routes in `app/components/backend/api/`:
+
+```python
+# app/components/backend/api/my_endpoints.py
+from fastapi import APIRouter
+from app.services.my_service import process_data
+
+router = APIRouter()
+
+@router.post("/process")
+async def process_endpoint(data: str):
+    result = await process_data(data)
+    return {"result": result}
+```
+
+Register in `app/components/backend/api/routing.py`:
+
+```python
+from app.components.backend.api import my_endpoints
+
+def include_routers(app: FastAPI) -> None:
+    app.include_router(my_endpoints.router, prefix="/api", tags=["processing"])
+```
+
+### 3. Add Background Tasks
+Create worker tasks in `app/components/worker/tasks/`:
+
+```python
+# app/components/worker/tasks/my_tasks.py
+async def background_process_data(data: str) -> dict[str, str]:
+    """Process data in background."""
+    logger.info(f"Processing {data} in background")
+    
+    # Your processing logic here
+    result = f"Processed: {data}"
+    
+    return {
+        "status": "completed",
+        "result": result,
+        "timestamp": datetime.now(UTC).isoformat()
+    }
+```
+
+Register in worker queue (`app/components/worker/queues/system.py`):
+
+```python
+from app.components.worker.tasks.my_tasks import background_process_data
+
+class WorkerSettings:
+    functions = [
+        system_health_check,
+        background_process_data,  # Add your task here
+    ]
+```
+
+## Testing
+
+### Running Tests
+```bash
+make test           # All tests
+make test-verbose   # Verbose output
+```
+
+### Writing Tests
+Create tests in the `tests/` directory:
+
+```python
+# tests/services/test_my_service.py
+import pytest
+from app.services.my_service import process_data
+
+@pytest.mark.asyncio
+async def test_process_data():
+    result = await process_data("test")
+    assert result == "Processed: test"
+```
+
+## Deployment
+
+### Docker Deployment
+```bash
+# Build and run
+make docker-build
+make docker-up
+
+# Or use profiles for specific components
+docker compose --profile dev up
+```
+
+### Environment Configuration
+Configure `.env` file for your environment:
+
+```env
+# API Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+## Monitoring and Health Checks
+
+nwvault-legacy includes comprehensive health monitoring:
+
+- **Health Endpoints**: `/health/` and `/health/detailed`
+- **CLI Commands**: `nwvault-legacy health check`
+- **Component Monitoring**: Automatic health checks for all components
+
+See [Health Monitoring](health.md) for complete details.

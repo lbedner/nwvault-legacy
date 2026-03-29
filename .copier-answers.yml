@@ -1,0 +1,32 @@
+_commit: 0e30656ba4325d95a24e067334aaeace0a7164b6
+_src_path: /private/var/folders/nm/_z4yr9914mj3r44201b79y9m0000gn/T/copier._vcs.clone.r52q5bz9
+_template_version: 0.6.7
+ai_backend: memory
+ai_framework: pydantic-ai
+ai_providers: openai
+ai_rag: false
+ai_voice: false
+auth_level: basic
+author_email: your.email@example.com
+author_name: Your Name
+database_engine: sqlite
+github_username: your-username
+include_ai: false
+include_auth: false
+include_auth_org: false
+include_auth_rbac: false
+include_cache: false
+include_comms: false
+include_database: true
+include_redis: true
+include_scheduler: false
+include_worker: true
+project_description: A production-ready async Python application built with Aegis
+  Stack
+project_name: nwvault-legacy
+project_slug: nwvault-legacy
+python_version: 3.14
+scheduler_backend: memory
+scheduler_with_persistence: false
+version: 0.1.0
+worker_backend: arq

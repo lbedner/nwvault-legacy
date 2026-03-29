@@ -1,0 +1,1245 @@
+"""
+System health monitoring functions.
+
+Pure functions for system health checking, monitoring, and status reporting.
+All functions use Pydantic models for type safety and validation.
+"""
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+import os
+from pathlib import Path
+import re
+import sys
+from typing import Any, cast
+
+import psutil
+
+from app.core.config import settings
+from app.core.log import logger
+
+from . import activity
+from .alerts import send_critical_alert, send_health_alert
+from .models import ComponentStatus, ComponentStatusType, SystemStatus
+
+# Global registry for custom health checks
+_health_checks: dict[str, Callable[[], Awaitable[ComponentStatus]]] = {}
+
+# Global registry for service health checks
+_service_health_checks: dict[str, Callable[[], Awaitable[ComponentStatus]]] = {}
+
+# Track previous status per component for activity events
+_previous_status: dict[str, ComponentStatusType] = {}
+
+# System metrics that shouldn't create separate activity events
+# (they're sub-components of backend)
+SYSTEM_METRICS = {"cpu", "memory", "disk"}
+
+
+def format_bytes(size: int) -> str:
+    """Format bytes into human-readable string."""
+    if size == 0:
+        return "0 B"
+
+    size_float = float(size)
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_float < 1024.0:
+            if unit == 'B':
+                return f"{int(size_float)} {unit}"
+            else:
+                return f"{size_float:.1f} {unit}"
+        size_float /= 1024.0
+    return f"{size_float:.1f} TB"
+
+
+def propagate_status(child_statuses: list[ComponentStatusType]) -> ComponentStatusType:
+    """
+    Determine parent status from child statuses using standard hierarchy.
+
+    Status priority (highest to lowest):
+    1. UNHEALTHY - Any unhealthy child makes parent unhealthy
+    2. WARNING - Any warning child makes parent warning (if no unhealthy)
+    3. INFO - Any info child makes parent info (if no unhealthy/warning)
+    4. HEALTHY - All children healthy makes parent healthy
+
+    Args:
+        child_statuses: List of ComponentStatusType from child components
+
+    Returns:
+        ComponentStatusType for the parent component
+    """
+    if not child_statuses:
+        return ComponentStatusType.HEALTHY
+
+    if any(status == ComponentStatusType.UNHEALTHY for status in child_statuses):
+        return ComponentStatusType.UNHEALTHY
+    elif any(status == ComponentStatusType.WARNING for status in child_statuses):
+        return ComponentStatusType.WARNING
+    elif any(status == ComponentStatusType.INFO for status in child_statuses):
+        return ComponentStatusType.INFO
+    elif all(status == ComponentStatusType.HEALTHY for status in child_statuses):
+        return ComponentStatusType.HEALTHY
+    else:
+        return ComponentStatusType.HEALTHY  # Default for edge cases
+
+# Cache for system metrics to improve performance
+_system_metrics_cache: dict[str, tuple[ComponentStatus, datetime]] = {}
+
+
+def register_health_check(
+    name: str, check_fn: Callable[[], Awaitable[ComponentStatus]]
+) -> None:
+    """
+    Register a custom health check function.
+
+    Args:
+        name: Unique name for the health check
+        check_fn: Async function that returns ComponentStatus or bool
+    """
+    _health_checks[name] = check_fn
+    logger.info(f"Registered custom health check: {name}")
+    # Note: Activity event is emitted by _run_health_check on first check
+    # with the actual status (not hardcoded "success")
+
+
+def register_service_health_check(
+    name: str, check_fn: Callable[[], Awaitable[ComponentStatus]]
+) -> None:
+    """
+    Register a service health check function.
+
+    Args:
+        name: Unique name for the service health check
+        check_fn: Async function that returns ComponentStatus
+    """
+    _service_health_checks[name] = check_fn
+    logger.info(f"Registered service health check: {name}")
+    # Note: Activity event is emitted by _run_health_check on first check
+    # with the actual status (not hardcoded "success")
+
+
+async def get_system_status() -> SystemStatus:
+    """
+    Get comprehensive system status.
+
+    Returns:
+        SystemStatus with all component health information organized as Aegis tree
+    """
+    start_time = datetime.now(UTC)
+
+    # Launch ALL checks concurrently (components + services + metrics)
+    # so total time = max(all checks) instead of sum(sequential groups)
+    component_tasks: list[tuple[str, asyncio.Task[ComponentStatus]]] = []
+    for name, check_fn in _health_checks.items():
+        task = asyncio.create_task(_run_health_check(name, check_fn))
+        component_tasks.append((name, task))
+
+    service_tasks: list[tuple[str, asyncio.Task[ComponentStatus]]] = []
+    for name, check_fn in _service_health_checks.items():
+        task = asyncio.create_task(_run_health_check(name, check_fn))
+        service_tasks.append((name, task))
+
+    metrics_task = asyncio.create_task(_get_cached_system_metrics(start_time))
+
+    # Collect component results
+    component_results = {}
+    for name, task in component_tasks:
+        try:
+            component_results[name] = await task
+        except Exception as e:
+            logger.error(f"Component check failed for {name}: {e}")
+            component_results[name] = ComponentStatus(
+                name=name,
+                status=ComponentStatusType.UNHEALTHY,
+                message=f"Health check failed: {str(e)}",
+                response_time_ms=None,
+            )
+
+    # Collect service results
+    service_results = {}
+    for name, task in service_tasks:
+        try:
+            service_results[name] = await task
+        except Exception as e:
+            logger.error(f"Service check failed for {name}: {e}")
+            service_results[name] = ComponentStatus(
+                name=name,
+                status=ComponentStatusType.UNHEALTHY,
+                message=f"Service health check failed: {str(e)}",
+                response_time_ms=None,
+            )
+
+    # Collect system metrics (already running concurrently)
+    system_metrics = await metrics_task
+
+    # Group system metrics under backend component if it exists
+    if "backend" in component_results:
+        # Backend exists - recreate with system metrics as sub-components
+        backend_component = component_results["backend"]
+
+        # Propagate status from system metrics and original backend status
+        system_metrics_statuses = [
+            getattr(metric, 'status', ComponentStatusType.HEALTHY)
+            for metric in system_metrics.values()
+        ]
+        original_backend_status = getattr(
+            backend_component, 'status', ComponentStatusType.HEALTHY
+        )
+        all_backend_statuses = system_metrics_statuses + [original_backend_status]
+
+        backend_status = propagate_status(all_backend_statuses)
+
+        component_results["backend"] = ComponentStatus(
+            name=backend_component.name,
+            status=backend_status,
+            message=backend_component.message,
+            response_time_ms=backend_component.response_time_ms,
+            metadata=backend_component.metadata,
+            sub_components=system_metrics,
+        )
+    else:
+        # Backend doesn't exist - create a virtual backend component to hold
+        # system metrics
+        backend_healthy = all(metric.healthy for metric in system_metrics.values())
+
+        # Propagate status from system metrics only
+        system_metrics_statuses = [
+            getattr(metric, 'status', ComponentStatusType.HEALTHY)
+            for metric in system_metrics.values()
+        ]
+        backend_status = propagate_status(system_metrics_statuses)
+
+        backend_message = (
+            "System container metrics"
+            if backend_healthy
+            else "System container has issues"
+        )
+
+        component_results["backend"] = ComponentStatus(
+            name="backend",
+            status=backend_status,
+            message=backend_message,
+            response_time_ms=None,
+            metadata={"type": "system_container", "virtual": True},
+            sub_components=system_metrics,
+        )
+
+    # Calculate overall health (including sub-components and services)
+    all_statuses = list(component_results.values()) + list(service_results.values())
+    for component in component_results.values():
+        all_statuses.extend(component.sub_components.values())
+    overall_healthy = all(status.healthy for status in all_statuses)
+
+    # Create Aegis root structure with components underneath
+    aegis_healthy = all(status.healthy for status in all_statuses)
+
+    # Propagate status from all top-level components and services
+    component_statuses = [
+        getattr(component, 'status', ComponentStatusType.HEALTHY)
+        for component in component_results.values()
+    ]
+    service_statuses = [
+        getattr(service, 'status', ComponentStatusType.HEALTHY)
+        for service in service_results.values()
+    ]
+    all_top_level_statuses = component_statuses + service_statuses
+    aegis_status = propagate_status(all_top_level_statuses)
+
+    aegis_message = (
+        "Aegis Stack application" if aegis_healthy else "Aegis Stack has issues"
+    )
+
+    # Create aegis sub-components structure with components and services grouped
+    aegis_sub_components = {}
+
+    # Group all components under "components" if any exist
+    if component_results:
+        components_status = propagate_status(component_statuses)
+        components_healthy = all(
+            component.healthy for component in component_results.values()
+        )
+        components_message = (
+            f"{len(component_results)} components available"
+            if components_healthy
+            else "Some components have issues"
+        )
+
+        aegis_sub_components["components"] = ComponentStatus(
+            name="components",
+            status=components_status,
+            message=components_message,
+            response_time_ms=None,
+            metadata={
+                "type": "components_group",
+                "total_components": len(component_results),
+                "component_names": list(component_results.keys()),
+            },
+            sub_components=component_results,
+        )
+
+    # Add services as a sub-component if any services are registered
+    if service_results:
+        # Determine services component status
+        services_status = propagate_status(service_statuses)
+        services_healthy = all(service.healthy for service in service_results.values())
+        services_message = (
+            f"{len(service_results)} services available"
+            if services_healthy
+            else "Some services have issues"
+        )
+
+        aegis_sub_components["services"] = ComponentStatus(
+            name="services",
+            status=services_status,
+            message=services_message,
+            response_time_ms=None,
+            metadata={
+                "type": "services_group",
+                "total_services": len(service_results),
+                "service_names": list(service_results.keys()),
+            },
+            sub_components=service_results,
+        )
+
+    root_components = {
+        "aegis": ComponentStatus(
+            name="aegis",
+            status=aegis_status,
+            message=aegis_message,
+            response_time_ms=None,
+            metadata={"type": "application_root", "version": "1.0"},
+            sub_components=aegis_sub_components,
+        )
+    }
+
+    # Get system information
+    system_info = _get_system_info()
+
+    status = SystemStatus(
+        components=root_components,
+        overall_healthy=overall_healthy,
+        timestamp=start_time,
+        system_info=system_info,
+    )
+
+    # Log unhealthy components (debug-only to avoid log spam from periodic checks)
+    if not overall_healthy:
+        logger.debug(
+            f"System unhealthy: {status.unhealthy_components}",
+            extra={"unhealthy_components": status.unhealthy_components},
+        )
+
+    return status
+
+
+async def is_system_healthy() -> bool:
+    """Quick check if system is overall healthy."""
+    status = await get_system_status()
+    return status.overall_healthy
+
+
+async def check_system_status() -> None:
+    """
+    Scheduled health check function for use in APScheduler jobs.
+
+    This function gets the system status and logs any issues.
+    Can be extended to send alerts to Slack, email, etc.
+    """
+    logger.debug("Running scheduled system health check")
+
+    try:
+        status = await get_system_status()
+
+        if status.overall_healthy:
+            log_msg = (
+                f"System healthy: {len(status.healthy_top_level_components)}/"
+                f"{status.total_components} components OK"
+            )
+            logger.debug(log_msg)
+        else:
+            logger.debug(
+                f"System issues detected: "
+                f"{len(status.unhealthy_components)} unhealthy components",
+                extra={
+                    "unhealthy_components": status.unhealthy_components,
+                    "health_percentage": status.health_percentage,
+                },
+            )
+
+            # Log details for each unhealthy component
+            for component_name in status.unhealthy_components:
+                component = status.components[component_name]
+                logger.debug(
+                    f"{component_name}: {component.message}",
+                    extra={"component": component.name, "metadata": component.metadata},
+                )
+
+            # Send health alerts
+            await send_health_alert(status)
+
+    except Exception as e:
+        logger.error(f"System health check failed: {e}")
+        # Send critical alert about monitoring failure
+        await send_critical_alert(f"Health monitoring failed: {e}", str(e))
+
+
+async def _get_cached_system_metrics(
+    current_time: datetime,
+) -> dict[str, ComponentStatus]:
+    """Get system metrics with caching for better performance."""
+    cache_duration = settings.SYSTEM_METRICS_CACHE_SECONDS
+    system_metric_checks = {
+        "memory": _check_memory,
+        "disk": _check_disk_space,
+        "cpu": _check_cpu_usage,
+    }
+
+    system_metrics = {}
+    tasks = []
+
+    for name, check_fn in system_metric_checks.items():
+        # Check if we have a valid cached result
+        if name in _system_metrics_cache:
+            cached_result, cached_time = _system_metrics_cache[name]
+            age_seconds = (current_time - cached_time).total_seconds()
+
+            if age_seconds < cache_duration:
+                # Use cached result
+                system_metrics[name] = cached_result
+                continue
+
+        # Need to run the check
+        task = asyncio.create_task(
+            _run_health_check_with_cache(name, check_fn, current_time)
+        )
+        tasks.append((name, task))
+
+    # Collect results from non-cached checks
+    for name, task in tasks:
+        try:
+            system_metrics[name] = await task
+        except Exception as e:
+            logger.error(f"System metric check failed for {name}: {e}")
+            system_metrics[name] = ComponentStatus(
+                name=name,
+                status=ComponentStatusType.UNHEALTHY,
+                message=f"Health check failed: {str(e)}",
+                response_time_ms=None,
+            )
+
+    return system_metrics
+
+
+async def _run_health_check_with_cache(
+    name: str, check_fn: Callable[[], Awaitable[ComponentStatus]], timestamp: datetime
+) -> ComponentStatus:
+    """Run health check and cache the result."""
+    result = await _run_health_check(name, check_fn)
+    _system_metrics_cache[name] = (result, timestamp)
+    return result
+
+
+async def _run_health_check(
+    name: str, check_fn: Callable[[], Awaitable[ComponentStatus]]
+) -> ComponentStatus:
+    """Run a single health check with timing and status change tracking."""
+    start_time = datetime.now(UTC)
+    try:
+        result = await check_fn()
+        end_time = datetime.now(UTC)
+        response_time = (end_time - start_time).total_seconds() * 1000
+
+        if isinstance(result, ComponentStatus):
+            result.response_time_ms = response_time
+
+            # Track status changes and emit activity events
+            current_status = result.status
+            previous_status = _previous_status.get(name)
+
+            # Skip activity events for system metrics (sub-components of backend)
+            if name not in SYSTEM_METRICS:
+                # Log on FIRST check (previous is None) OR status change
+                if previous_status is None or previous_status != current_status:
+                    event_status = (
+                        "success" if current_status == ComponentStatusType.HEALTHY
+                        else "error" if current_status == ComponentStatusType.UNHEALTHY
+                        else "info" if current_status == ComponentStatusType.INFO
+                        else "warning"
+                    )
+                    display_name = name.replace("_", " ").title()
+                    details = result.message if result.message else None
+
+                    if previous_status is None:
+                        # First health check - use startup message with actual status
+                        activity.add_event(
+                            component=name,
+                            event_type="startup",
+                            message=f"{display_name} initialized",
+                            status=event_status,
+                            details=details,
+                        )
+                    else:
+                        # Status change
+                        change_msg = (
+                            f"{display_name}: "
+                            f"{previous_status.value} → "
+                            f"{current_status.value}"
+                        )
+                        activity.add_event(
+                            component=name,
+                            event_type="status_change",
+                            message=change_msg,
+                            status=event_status,
+                            details=details,
+                        )
+
+            _previous_status[name] = current_status
+
+            return result
+        else:
+            return ComponentStatus(
+                name=name,
+                status=(
+                    ComponentStatusType.HEALTHY if bool(result)
+                    else ComponentStatusType.UNHEALTHY
+                ),
+                message="OK" if result else "Failed",
+                response_time_ms=response_time,
+            )
+    except Exception as e:
+        end_time = datetime.now(UTC)
+        response_time = (end_time - start_time).total_seconds() * 1000
+        return ComponentStatus(
+            name=name,
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Error: {str(e)}",
+            response_time_ms=response_time,
+        )
+
+
+def _get_system_info() -> dict[str, Any]:
+    """Get general system information."""
+    try:
+        return {
+            "python_version": (
+                f"{sys.version_info.major}."
+                f"{sys.version_info.minor}."
+                f"{sys.version_info.micro}"
+            ),
+            "platform": psutil.WINDOWS if psutil.WINDOWS else "unix",
+            "containerized": "docker" if os.path.exists("/.dockerenv") else "false",
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get system info: {e}")
+        return {"error": str(e)}
+
+
+async def _check_memory() -> ComponentStatus:
+    """Check system memory usage."""
+    try:
+        # Run in thread to avoid blocking
+        memory = await asyncio.to_thread(psutil.virtual_memory)
+        memory_percent = memory.percent
+
+        # Determine status based on memory usage thresholds
+        if memory_percent >= settings.MEMORY_THRESHOLD_PERCENT:
+            status = ComponentStatusType.UNHEALTHY
+        elif memory_percent >= settings.MEMORY_THRESHOLD_PERCENT * 0.8:
+            status = ComponentStatusType.WARNING
+        else:
+            status = ComponentStatusType.HEALTHY
+
+        return ComponentStatus(
+            name="memory",
+            status=status,
+            message=f"Memory usage: {memory_percent:.1f}%",
+            response_time_ms=None,
+            metadata={
+                "percent_used": memory_percent,
+                "total_gb": round(memory.total / (1024**3), 2),
+                "available_gb": round(memory.available / (1024**3), 2),
+                "threshold_percent": settings.MEMORY_THRESHOLD_PERCENT,
+            },
+        )
+    except Exception as e:
+        return ComponentStatus(
+            name="memory",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Failed to check memory: {e}",
+            response_time_ms=None,
+        )
+
+
+async def _check_disk_space() -> ComponentStatus:
+    """Check disk space usage."""
+    try:
+        # Run in thread to avoid blocking
+        disk = await asyncio.to_thread(psutil.disk_usage, "/")
+        disk_percent = (disk.used / disk.total) * 100
+
+        # Determine status based on disk usage thresholds
+        if disk_percent >= settings.DISK_THRESHOLD_PERCENT:
+            status = ComponentStatusType.UNHEALTHY
+        elif disk_percent >= settings.DISK_THRESHOLD_PERCENT * 0.8:
+            status = ComponentStatusType.WARNING
+        else:
+            status = ComponentStatusType.HEALTHY
+
+        return ComponentStatus(
+            name="disk",
+            status=status,
+            message=f"Disk usage: {disk_percent:.1f}%",
+            response_time_ms=None,
+            metadata={
+                "percent_used": disk_percent,
+                "total_gb": round(disk.total / (1024**3), 2),
+                "free_gb": round(disk.free / (1024**3), 2),
+                "threshold_percent": settings.DISK_THRESHOLD_PERCENT,
+            },
+        )
+    except Exception as e:
+        return ComponentStatus(
+            name="disk",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Failed to check disk space: {e}",
+            response_time_ms=None,
+        )
+
+
+async def _check_cpu_usage() -> ComponentStatus:
+    """Check CPU usage (instant sampling)."""
+    try:
+        # Get instant CPU usage (non-blocking, immediate reading)
+        cpu_percent = await asyncio.to_thread(psutil.cpu_percent, None)
+
+        # Determine status based on CPU usage thresholds
+        if cpu_percent >= settings.CPU_THRESHOLD_PERCENT:
+            status = ComponentStatusType.UNHEALTHY
+        elif cpu_percent >= settings.CPU_THRESHOLD_PERCENT * 0.8:
+            status = ComponentStatusType.WARNING
+        else:
+            status = ComponentStatusType.HEALTHY
+
+        return ComponentStatus(
+            name="cpu",
+            status=status,
+            message=f"CPU usage: {cpu_percent:.1f}%",
+            response_time_ms=None,
+            metadata={
+                "percent_used": cpu_percent,
+                "cpu_count": psutil.cpu_count(),
+                "threshold_percent": settings.CPU_THRESHOLD_PERCENT,
+            },
+        )
+    except Exception as e:
+        return ComponentStatus(
+            name="cpu",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Failed to check CPU usage: {e}",
+            response_time_ms=None,
+        )
+
+
+def _decode_slowlog_arg(arg: Any) -> str:
+    """Decode a single SLOWLOG command argument to a readable string."""
+    if isinstance(arg, bytes):
+        return arg.decode("utf-8", errors="replace")
+    if isinstance(arg, str):
+        return arg
+    if isinstance(arg, (list, tuple)):
+        # redis-py can return args as list of ints (ASCII byte values)
+        try:
+            return bytes(arg).decode("utf-8", errors="replace")
+        except (ValueError, TypeError):
+            return str(arg)
+    return str(arg)
+
+
+def _decode_slowlog_command(command: Any) -> str:
+    """Decode a SLOWLOG command entry to a human-readable string."""
+    if isinstance(command, (list, tuple)):
+        return " ".join(_decode_slowlog_arg(arg) for arg in command)
+    if isinstance(command, bytes):
+        return command.decode("utf-8", errors="replace")
+    return str(command)
+
+
+async def check_cache_health() -> ComponentStatus:
+    """
+    Check cache connectivity and basic functionality.
+
+    Returns:
+        ComponentStatus indicating cache health
+    """
+    try:
+        import redis
+        import redis.asyncio as aioredis
+
+        # Create Redis connection with timeout
+        redis_url = (
+            settings.redis_url_effective
+            if hasattr(settings, 'redis_url_effective')
+            else settings.REDIS_URL
+        )
+        redis_connection = aioredis.from_url(  # type: ignore[no-untyped-call]
+            redis_url,
+            db=settings.REDIS_DB,
+            socket_timeout=settings.HEALTH_CHECK_TIMEOUT_SECONDS,
+            socket_connect_timeout=settings.HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+        redis_client: aioredis.Redis = cast(aioredis.Redis, redis_connection)
+
+        start_time = datetime.now(UTC)
+
+        # Test basic connectivity with ping
+        await redis_client.ping()
+
+        # Test basic set/get functionality
+        test_key = "health_check:test"
+        test_value = f"test_{start_time.timestamp()}"
+        await redis_client.set(test_key, test_value, ex=10)  # Expire in 10 seconds
+        retrieved_value = await redis_client.get(test_key)
+
+        # Cleanup test key
+        await redis_client.delete(test_key)
+
+        # Verify test worked
+        if retrieved_value.decode() != test_value:
+            raise Exception("Redis set/get test failed")
+
+        # Get comprehensive Redis info for detailed monitoring
+        # Reuse existing connection instead of creating a second one
+        redis_info_client = redis_client
+
+        # Get multiple INFO sections for comprehensive metrics
+        info = await redis_info_client.info()
+        stats_info = await redis_info_client.info('stats')
+        memory_info = await redis_info_client.info('memory')
+        clients_info = await redis_info_client.info('clients')
+        keyspace_info = await redis_info_client.info('keyspace')
+
+        # Get recent slow query log entries from Redis SLOWLOG
+        slowlog_entries: list[dict[str, Any]] = []
+        try:
+            slowlog = await redis_info_client.slowlog_get(10)
+            slowlog_entries = [
+                {
+                    "id": entry["id"],
+                    "timestamp": entry["start_time"],
+                    # Convert microseconds to ms
+                    "duration_ms": round(entry["duration"] / 1000, 2),
+                    "command": _decode_slowlog_command(entry["command"]),
+                }
+                for entry in slowlog
+            ]
+        except (redis.exceptions.RedisError, AttributeError, KeyError) as e:
+            logger.warning(f"Failed to get SLOWLOG: {e}")
+
+        # Get active client connections
+        active_clients: list[dict[str, str]] = []
+        try:
+            client_list = await redis_info_client.client_list()
+            active_clients = [
+                {
+                    "id": str(client.get("id", "")),
+                    "addr": str(client.get("addr", "")),
+                    "age": str(client.get("age", "0")),
+                    "idle": str(client.get("idle", "0")),
+                    "db": str(client.get("db", "0")),
+                    "cmd": str(client.get("cmd", "")),
+                }
+                for client in client_list
+            ]
+        except (redis.exceptions.RedisError, AttributeError, KeyError) as e:
+            logger.warning(f"Failed to get CLIENT LIST: {e}")
+
+        await redis_info_client.aclose()
+        
+        # Calculate derived metrics
+        keyspace_hits = stats_info.get('keyspace_hits', 0)
+        keyspace_misses = stats_info.get('keyspace_misses', 0)
+        total_keyspace_ops = keyspace_hits + keyspace_misses
+        hit_rate = (keyspace_hits / max(total_keyspace_ops, 1)) * 100
+        
+        # Extract total keys from all databases
+        total_keys = 0
+        keys_with_expiry = 0
+        for key, value in keyspace_info.items():
+            if key.startswith('db'):
+                # Redis info('keyspace') returns nested dict format
+                if isinstance(value, dict):
+                    total_keys += value.get('keys', 0)
+                    keys_with_expiry += value.get('expires', 0)
+        
+        # Memory usage calculations
+        used_memory = memory_info.get('used_memory', 0)
+        used_memory_peak = memory_info.get('used_memory_peak', 0)
+        mem_fragmentation_ratio = memory_info.get('mem_fragmentation_ratio', 1.0)
+        
+        return ComponentStatus(
+            name="cache",
+            status=ComponentStatusType.HEALTHY,
+            message="Redis cache connection and operations successful",
+            response_time_ms=None,  # Will be set by caller
+            metadata={
+                "implementation": "redis",
+                "version": info.get("redis_version", "unknown"),
+                "url": redis_url,
+                "db": settings.REDIS_DB,
+                
+                # Connection and client metrics
+                "connected_clients": clients_info.get("connected_clients", 0),
+                "blocked_clients": clients_info.get("blocked_clients", 0),
+                "client_longest_output_list": clients_info.get(
+                    "client_longest_output_list", 0
+                ),
+                
+                # Server uptime
+                "uptime_in_seconds": info.get("uptime_in_seconds", 0),
+                
+                # Memory metrics
+                "used_memory": used_memory,
+                "used_memory_human": memory_info.get("used_memory_human", "unknown"),
+                "used_memory_peak": used_memory_peak,
+                "used_memory_peak_human": memory_info.get(
+                    "used_memory_peak_human", "unknown"
+                ),
+                "mem_fragmentation_ratio": mem_fragmentation_ratio,
+                "maxmemory": memory_info.get("maxmemory", 0),
+                "maxmemory_human": memory_info.get("maxmemory_human", "0B"),
+                
+                # Performance and cache metrics
+                "instantaneous_ops_per_sec": stats_info.get(
+                    "instantaneous_ops_per_sec", 0
+                ),
+                "keyspace_hits": keyspace_hits,
+                "keyspace_misses": keyspace_misses,
+                "hit_rate_percent": hit_rate,
+                "evicted_keys": stats_info.get("evicted_keys", 0),
+                "expired_keys": stats_info.get("expired_keys", 0),
+                
+                # Keyspace statistics
+                "total_keys": total_keys,
+                "keys_with_expiry": keys_with_expiry,
+                
+                # Additional useful stats
+                "total_commands_processed": stats_info.get(
+                    "total_commands_processed", 0
+                ),
+                "total_connections_received": stats_info.get(
+                    "total_connections_received", 0
+                ),
+                "rejected_connections": stats_info.get("rejected_connections", 0),
+
+                # Slow queries and client connections
+                "slowlog_entries": slowlog_entries,
+                "active_clients": active_clients,
+            },
+        )
+
+    except ImportError:
+        return ComponentStatus(
+            name="cache",
+            status=ComponentStatusType.UNHEALTHY,
+            message="Cache library not installed",
+            response_time_ms=None,
+            metadata={
+                "implementation": "redis",
+                "error": "Redis library not available",
+            },
+        )
+    except Exception as e:
+        return ComponentStatus(
+            name="cache",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Cache health check failed: {str(e)}",
+            response_time_ms=None,
+            metadata={
+                "implementation": "redis",
+                "url": (
+                    settings.redis_url_effective 
+                    if hasattr(settings, 'redis_url_effective') 
+                    else settings.REDIS_URL
+                ),
+                "db": settings.REDIS_DB,
+                "error": str(e),
+                # Provide fallback values for card display
+                "connected_clients": 0,
+                "used_memory_human": "unknown",
+                "uptime_in_seconds": 0,
+                "instantaneous_ops_per_sec": 0,
+                "hit_rate_percent": 0,
+                "total_keys": 0,
+                "evicted_keys": 0,
+                "expired_keys": 0,
+            },
+        )
+
+async def check_worker_health() -> ComponentStatus:
+    """
+    Check arq worker status using arq's native health checks and queue configuration.
+
+    Returns:
+        ComponentStatus indicating worker infrastructure health with queue
+        sub-components
+    """
+    try:
+        import re
+
+        import redis.asyncio as aioredis
+
+        # Create Redis connection with auto-detection for local vs Docker
+        # Step 1: Call untyped function with explicit ignore
+        redis_connection = aioredis.from_url(  # type: ignore[no-untyped-call]
+            settings.redis_url_effective,
+            db=settings.REDIS_DB,
+            socket_timeout=3,
+            socket_connect_timeout=3,
+        )
+        # Step 2: Cast the result to proper type
+        redis_client: aioredis.Redis = cast(aioredis.Redis, redis_connection)
+
+        # Get queue metadata from WorkerSettings classes via dynamic discovery
+        from app.components.worker.registry import get_all_queue_metadata
+        functional_queues = get_all_queue_metadata()
+
+        # Check each queue and create sub-components
+        queue_sub_components = {}
+        total_queued = 0
+        total_completed = 0
+        total_failed = 0
+        total_retried = 0
+        total_ongoing = 0
+        active_workers = 0
+
+        for queue_type, queue_config in functional_queues.items():
+            queue_name = queue_config["queue_name"]
+
+            try:
+                # Get queue length (actual queued jobs) - arq uses sorted sets
+                queue_length_result = redis_client.zcard(queue_name)
+                if hasattr(queue_length_result, '__await__'):
+                    queue_length = await queue_length_result
+                else:
+                    queue_length = queue_length_result
+                total_queued += queue_length
+
+                # Look for arq health check key for this queue
+                # arq health check key format: {queue_name}:health-check
+                health_check_key = f"{queue_name}:health-check"
+                health_check_data = await redis_client.get(health_check_key)
+
+                # Parse arq health check data if available
+                j_complete = j_failed = j_retried = j_ongoing = 0
+                worker_alive = False
+                last_health_check = None
+
+                if health_check_data:
+                    health_string = health_check_data.decode()
+                    # Parse format: "Mar-01 17:41:22 j_complete=0 j_failed=0 ..."
+
+                    # Extract timestamp (first part before job stats)
+                    timestamp_match = re.match(r"^(\w+-\d+ \d+:\d+:\d+)", health_string)
+                    if timestamp_match:
+                        last_health_check = timestamp_match.group(1)
+
+                    # Extract job statistics using regex
+                    j_complete_match = re.search(r"j_complete=(\d+)", health_string)
+                    j_failed_match = re.search(r"j_failed=(\d+)", health_string)
+                    j_retried_match = re.search(r"j_retried=(\d+)", health_string)
+                    j_ongoing_match = re.search(r"j_ongoing=(\d+)", health_string)
+
+                    if j_complete_match:
+                        j_complete = int(j_complete_match.group(1))
+                        total_completed += j_complete
+                    if j_failed_match:
+                        j_failed = int(j_failed_match.group(1))
+                        total_failed += j_failed
+                    if j_retried_match:
+                        j_retried = int(j_retried_match.group(1))
+                        total_retried += j_retried
+                    if j_ongoing_match:
+                        j_ongoing = int(j_ongoing_match.group(1))
+                        total_ongoing += j_ongoing
+
+                    # Worker is alive if we have health check data
+                    # arq health checks expire automatically, having data means recent
+                    worker_alive = True
+
+                    if worker_alive:
+                        active_workers += 1
+
+                # Create queue status message
+                status_parts = []
+                if not worker_alive:
+                    status_parts.append("worker offline - no health check data")
+                elif j_ongoing > 0:
+                    status_parts.append(f"{j_ongoing} processing")
+                elif queue_length > 0:
+                    status_parts.append(f"{queue_length} queued")
+                else:
+                    status_parts.append("idle")
+
+                # Add job statistics to status if worker is alive
+                if worker_alive and (j_complete > 0 or j_failed > 0):
+                    if j_failed > 0:
+                        failure_rate = (j_failed / max(j_complete + j_failed, 1)) * 100
+                        status_parts.append(f"{j_failed} failed ({failure_rate:.1f}%)")
+                    if j_complete > 0:
+                        status_parts.append(f"{j_complete} completed")
+
+                # Check if queue has no functions configured (empty functions list)
+                queue_functions = queue_config.get("functions", [])
+                has_functions = len(queue_functions) > 0
+
+                # Determine queue status based on worker health and failure rate
+                failure_rate = (
+                    (j_failed / max(j_complete + j_failed, 1)) * 100
+                    if worker_alive
+                    else 100
+                )
+
+                if not worker_alive and not has_functions:
+                    # Queue configured but no functions - show as INFO
+                    queue_status = ComponentStatusType.INFO
+                    status_parts = ["configured - no functions defined"]
+                elif not worker_alive:
+                    # Worker offline with functions defined - this is a warning
+                    queue_status = ComponentStatusType.WARNING
+                elif failure_rate > 25:  # Unhealthy threshold at 25%
+                    queue_status = ComponentStatusType.UNHEALTHY
+                elif failure_rate > 10:  # Warning threshold at 10%
+                    queue_status = ComponentStatusType.WARNING
+                else:
+                    queue_status = ComponentStatusType.HEALTHY
+
+                queue_message = (
+                    f"{queue_config['description']}: {', '.join(status_parts)}"
+                )
+
+                queue_metadata = {
+                    "queue_type": queue_type,
+                    "queue_name": queue_name,
+                    "queued_jobs": queue_length,
+                    "max_concurrency": queue_config["max_jobs"],
+                    "timeout_seconds": queue_config["timeout"],
+                    "description": queue_config["description"],
+                    "worker_alive": worker_alive,
+                    "health_check_key": health_check_key,
+                }
+
+                # Add arq health check statistics if available
+                if worker_alive:
+                    queue_metadata.update(
+                        {
+                            "jobs_completed": j_complete,
+                            "jobs_failed": j_failed,
+                            "jobs_retried": j_retried,
+                            "jobs_ongoing": j_ongoing,
+                            "failure_rate_percent": round(failure_rate, 1),
+                            "last_health_check": last_health_check,
+                        }
+                    )
+                else:
+                    queue_metadata["offline_reason"] = "Health check key not found"
+
+                queue_sub_components[queue_type] = ComponentStatus(
+                    name=queue_type,
+                    status=queue_status,
+                    message=queue_message,
+                    response_time_ms=None,
+                    metadata=queue_metadata,
+                    sub_components={},
+                )
+
+            except aioredis.ConnectionError as e:
+                logger.error(f"Redis connection failed for {queue_type}: {e}")
+
+                # Extract more specific connection error details
+                error_details = str(e).lower()
+                if "connection refused" in error_details:
+                    connection_issue = "Redis server not running"
+                elif (
+                    "name or service not known" in error_details
+                    or "nodename nor servname" in error_details
+                ):
+                    connection_issue = "Redis server DNS resolution failed"
+                elif "timeout" in error_details:
+                    connection_issue = "Redis server connection timeout"
+                else:
+                    connection_issue = "Redis server unreachable"
+
+                queue_sub_components[queue_type] = ComponentStatus(
+                    name=queue_type,
+                    status=ComponentStatusType.UNHEALTHY,
+                    message=f"{connection_issue} - worker offline",
+                    response_time_ms=None,
+                    metadata={
+                        "queue_type": queue_type,
+                        "queue_name": queue_name,
+                        "error_type": "redis_connection_error",
+                        "error": str(e),
+                        "connection_issue": connection_issue,
+                        "recommendation": (
+                            "Check Redis server status and network connectivity"
+                        ),
+                    },
+                    sub_components={},
+                )
+            except aioredis.ResponseError as e:
+                if "WRONGTYPE" in str(e):
+                    logger.error(f"Redis data corruption for {queue_type}: {e}")
+                    message = "Redis data corruption detected"
+                    recommendation = "Clear Redis cache to fix data type conflicts"
+                    error_type = "redis_key_type_error"
+                else:
+                    logger.error(f"Redis operation failed for {queue_type}: {e}")
+                    message = "Redis operation failed"
+                    recommendation = "Check Redis configuration and permissions"
+                    error_type = "redis_response_error"
+
+                queue_sub_components[queue_type] = ComponentStatus(
+                    name=queue_type,
+                    status=ComponentStatusType.UNHEALTHY,
+                    message=message,
+                    response_time_ms=None,
+                    metadata={
+                        "queue_type": queue_type,
+                        "queue_name": queue_name,
+                        "error_type": error_type,
+                        "error": str(e),
+                        "recommendation": recommendation,
+                    },
+                    sub_components={},
+                )
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error checking {queue_type} queue health: {e}"
+                )
+                queue_sub_components[queue_type] = ComponentStatus(
+                    name=queue_type,
+                    status=ComponentStatusType.UNHEALTHY,
+                    message=f"Health check failed: {type(e).__name__}",
+                    response_time_ms=None,
+                    metadata={
+                        "queue_type": queue_type,
+                        "queue_name": queue_name,
+                        "error_type": "unexpected_error",
+                        "error": str(e),
+                        "exception_class": type(e).__name__,
+                    },
+                    sub_components={},
+                )
+
+        await redis_client.aclose()
+
+        # Create main worker status message
+        message_parts = []
+        if active_workers == 0:
+            message_parts.append("No active workers")
+        else:
+            message_parts.append(
+                f"{active_workers}/{len(functional_queues)} workers active"
+            )
+
+        if total_queued > 0:
+            message_parts.append(f"{total_queued} queued")
+        if total_ongoing > 0:
+            message_parts.append(f"{total_ongoing} processing")
+        if total_failed > 0:
+            failure_rate = (total_failed / max(total_completed + total_failed, 1)) * 100
+            message_parts.append(f"{total_failed} failed ({failure_rate:.1f}%)")
+
+        main_message = f"arq worker infrastructure: {', '.join(message_parts)}"
+
+        # Create a "queues" intermediate component that contains all queue
+        # sub-components - determine status from child statuses
+        queue_statuses = [queue.status for queue in queue_sub_components.values()]
+        queues_status = propagate_status(queue_statuses)
+
+
+        queues_message = f"{len(functional_queues)} functional queues configured"
+        if active_workers < len(functional_queues):
+            queues_message += f" ({active_workers} active)"
+
+        queues_component = ComponentStatus(
+            name="queues",
+            status=queues_status,
+            message=queues_message,
+            response_time_ms=None,
+            metadata={
+                "configured_queues": len(functional_queues),
+                "active_workers": active_workers,
+                "queue_types": list(functional_queues.keys()),
+            },
+            sub_components=queue_sub_components,
+        )
+
+        # Determine worker status from queue statuses (let propagate_status handle it)
+        worker_status = propagate_status([queues_status])
+
+        # Get arq version for display
+        try:
+            import arq
+
+            arq_version = getattr(arq, "VERSION", "")
+            if isinstance(arq_version, tuple):
+                arq_version = ".".join(str(v) for v in arq_version)
+        except ImportError:
+            arq_version = ""
+
+        return ComponentStatus(
+            name="worker",
+            status=worker_status,
+            message=main_message,
+            response_time_ms=None,
+            metadata={
+                "total_queued": total_queued,
+                "total_completed": total_completed,
+                "total_failed": total_failed,
+                "total_retried": total_retried,
+                "total_ongoing": total_ongoing,
+                "overall_failure_rate_percent": (
+                    round(
+                        (total_failed / max(total_completed + total_failed, 1)) * 100, 1
+                    )
+                    if total_completed + total_failed > 0
+                    else 0
+                ),
+                "redis_url": settings.REDIS_URL,
+                "version": arq_version,
+                "queue_configuration": {
+                    queue_type: {
+                        "description": config["description"],
+                        "max_jobs": config["max_jobs"],
+                        "timeout_seconds": config["timeout"],
+                    }
+                    for queue_type, config in functional_queues.items()
+                },
+            },
+            sub_components={"queues": queues_component},
+        )
+
+    except ImportError:
+        return ComponentStatus(
+            name="worker",
+            status=ComponentStatusType.UNHEALTHY,
+            message="Redis library not available for worker health check",
+            response_time_ms=None,
+            sub_components={},
+        )
+    except Exception as e:
+        logger.error(f"Worker health check failed: {e}")
+        return ComponentStatus(
+            name="worker",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Worker health check failed: {str(e)}",
+            response_time_ms=None,
+            metadata={
+                "error": str(e),
+                "redis_url": settings.REDIS_URL,
+            },
+            sub_components={},
+        )
+

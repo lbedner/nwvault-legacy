@@ -1,0 +1,29 @@
+# Development overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile dev up
+#
+# Adds:
+#   - Code volume mounts for hot-reload
+#   - Debug ports for direct service access
+
+services:
+  webserver:
+    volumes:
+      - .:/code
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+
+  worker-load-test:
+    volumes:
+      - .:/code
+
+  worker-system:
+    volumes:
+      - .:/code
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  test_runner:
+    volumes:
+      - .:/code
