@@ -6,8 +6,8 @@ worker started/stopped) to a Redis Stream. These events are consumed by the SSE
 endpoint to provide real-time dashboard updates.
 """
 
-import re
 from datetime import UTC, datetime
+import re
 from typing import Any
 
 from app.core.log import logger

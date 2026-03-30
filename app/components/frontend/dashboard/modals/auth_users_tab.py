@@ -10,6 +10,7 @@ from typing import Any
 
 import flet as ft
 import httpx
+
 from app.components.frontend.controls import (
     ConfirmDialog,
     DataTable,

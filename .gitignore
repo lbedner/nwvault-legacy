@@ -61,6 +61,9 @@ db.sqlite3
 data/
 *.db
 
+# Downloaded vault archive (large, not in git)
+archive/
+
 # Flask stuff:
 instance/
 .webassets-cache

@@ -12,12 +12,6 @@ from pathlib import Path
 from app.core.log import logger
 
 
-
-
-
-
-
-
 def _check_schema_mismatch() -> None:
     """
     Detect missing columns/tables and warn user.

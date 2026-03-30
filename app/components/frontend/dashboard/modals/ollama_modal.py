@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     H3Text,

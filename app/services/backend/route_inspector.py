@@ -16,11 +16,11 @@ from app.services.backend.models import RouteInfo, RouteMetadata
 
 class FastAPIRouteInspector:
     """Utility class for extracting route information from FastAPI apps."""
-    
+
     def __init__(self, app: fastapi.FastAPI) -> None:
         """Initialize with FastAPI application instance."""
         self.app = app
-    
+
     def get_routes_metadata(self) -> RouteMetadata:
         """
         Extract comprehensive route information from FastAPI app.
@@ -30,7 +30,7 @@ class FastAPIRouteInspector:
         """
         try:
             routes_data = []
-            
+
             # Extract route information
             for route in self.app.routes:
                 if isinstance(route, APIRoute):
@@ -49,14 +49,14 @@ class FastAPIRouteInspector:
                         ),
                     )
                     routes_data.append(route_info)
-            
+
             # Calculate statistics
             total_routes = len(routes_data)
             total_endpoints = sum(len(r.methods) for r in routes_data)
             method_counts = self._count_methods(routes_data)
             route_groups = self._group_routes_by_prefix(routes_data)
             tag_groups = self._group_routes_by_tags(routes_data)
-            
+
             return RouteMetadata(
                 routes=routes_data,
                 total_routes=total_routes,
@@ -70,11 +70,11 @@ class FastAPIRouteInspector:
                 has_health=any("/health" in r.path for r in routes_data),
                 deprecated_count=sum(1 for r in routes_data if r.deprecated),
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to extract route metadata: {e}")
             return self._get_fallback_metadata(str(e))
-    
+
     def _extract_path_params(self, path: str) -> list[str]:
         """Extract path parameters from route path."""
         import re
@@ -83,6 +83,7 @@ class FastAPIRouteInspector:
     def _extract_dependency_names(self, route: APIRoute) -> list[str]:
         """Extract dependency names from router and parameter dependencies."""
         import inspect
+
         from fastapi.params import Depends
 
         dependency_names = []
@@ -129,14 +130,14 @@ class FastAPIRouteInspector:
                 if method != "HEAD":  # Skip HEAD methods as they're automatic
                     method_counts[method] = method_counts.get(method, 0) + 1
         return method_counts
-    
+
     def _group_routes_by_prefix(self, routes: list[RouteInfo]) -> dict[str, int]:
         """Group routes by path prefix for organization."""
         groups: dict[str, int] = {}
         for route in routes:
             path_parts = route.path.strip("/").split("/")
             prefix = path_parts[0] if path_parts[0] else "root"
-            
+
             # Special handling for common patterns
             if prefix in ["health", "docs", "redoc", "openapi.json"]:
                 groups[prefix] = groups.get(prefix, 0) + 1
@@ -150,9 +151,9 @@ class FastAPIRouteInspector:
                 groups[prefix] = groups.get(prefix, 0) + 1
             else:
                 groups[prefix] = groups.get(prefix, 0) + 1
-        
+
         return groups
-    
+
     def _group_routes_by_tags(self, routes: list[RouteInfo]) -> dict[str, int]:
         """Group routes by OpenAPI tags."""
         tag_counts: dict[str, int] = {}
@@ -163,7 +164,7 @@ class FastAPIRouteInspector:
                 for tag in route.tags:
                     tag_counts[tag] = tag_counts.get(tag, 0) + 1
         return tag_counts
-    
+
     def _get_fallback_metadata(self, error: str) -> RouteMetadata:
         """Return fallback metadata when introspection fails."""
         return RouteMetadata(

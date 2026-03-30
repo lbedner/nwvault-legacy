@@ -8,6 +8,7 @@ full light/dark mode support, and smooth theme transitions.
 from dataclasses import dataclass
 
 import flet as ft
+
 from app.components.frontend.styles import FontConfig
 
 

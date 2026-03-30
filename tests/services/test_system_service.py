@@ -1,6 +1,7 @@
 """Test system monitoring functions."""
 
 import pytest
+
 from app.services.system import (
     ComponentStatus,
     get_system_status,

@@ -2,11 +2,11 @@
 """Server-Sent Events endpoint for real-time worker event streaming."""
 
 import asyncio
-import json
 from collections.abc import AsyncGenerator
+import json
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Request
+import redis.asyncio as aioredis
 from starlette.responses import StreamingResponse
 
 from app.components.worker.events import WORKER_EVENT_STREAM, read_queue_totals
@@ -34,7 +34,7 @@ async def worker_event_stream(request: Request) -> StreamingResponse:
     events as deltas. The frontend is responsible for batching UI updates.
     """
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def event_generator() -> AsyncGenerator[str]:
         redis_url = (
             settings.redis_url_effective
             if hasattr(settings, "redis_url_effective")

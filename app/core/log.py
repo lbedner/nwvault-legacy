@@ -7,14 +7,15 @@ It supports both human-readable console output for development and JSON
 output for production environments.
 """
 
-import logging
-import sys
 from collections.abc import Generator
 from contextlib import contextmanager
+import logging
+import sys
 
 import structlog
-from app.core.config import settings
 from structlog.types import Processor
+
+from app.core.config import settings
 
 # A global logger instance for easy access throughout the application
 logger: structlog.stdlib.BoundLogger = structlog.get_logger()
@@ -114,7 +115,7 @@ def setup_logging() -> None:
 
 
 @contextmanager
-def suppress_logs(level: int = logging.ERROR) -> Generator[None, None, None]:
+def suppress_logs(level: int = logging.ERROR) -> Generator[None]:
     """
     Temporarily suppress logs during CLI operations.
 

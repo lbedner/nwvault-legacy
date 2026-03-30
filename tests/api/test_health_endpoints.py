@@ -7,8 +7,8 @@ ensuring API responses match expected CLI input format and handle errors correct
 
 from collections.abc import AsyncIterator
 
+from httpx import ASGITransport, AsyncClient
 import pytest
-from httpx import AsyncClient, ASGITransport
 
 from app.integrations.main import create_integrated_app
 

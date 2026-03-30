@@ -9,6 +9,7 @@ Each section is a self-contained Flet control for reusability and testing.
 from datetime import datetime
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     H3Text,

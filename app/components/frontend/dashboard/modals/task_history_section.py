@@ -12,6 +12,7 @@ import contextlib
 import threading
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     DataTableColumn,

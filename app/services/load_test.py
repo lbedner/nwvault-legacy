@@ -7,6 +7,8 @@ separating concerns from API endpoints and worker tasks.
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.components.worker.constants import LoadTestTypes
 from app.components.worker.pools import get_queue_pool
 from app.core.config import get_load_test_queue
@@ -20,7 +22,6 @@ from app.services.load_test_models import (
     TestTypeInfo,
     ValidationStatus,
 )
-from pydantic import ValidationError
 
 __all__ = [
     "LoadTestConfiguration",

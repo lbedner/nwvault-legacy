@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 import flet as ft
+
 from app.components.frontend import styles
 from app.components.frontend.controls.text import BodyText, H3Text
 

@@ -6,8 +6,8 @@ preserving comments, ordering, and formatting while allowing
 dynamic updates to specific keys.
 """
 
-import re
 from pathlib import Path
+import re
 
 from app.core.config import settings
 

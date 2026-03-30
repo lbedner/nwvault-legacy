@@ -11,6 +11,7 @@ Displays comprehensive database information in a tabbed interface:
 from datetime import datetime
 
 import flet as ft
+
 from app.components.frontend.controls import (
     DataTable,
     DataTableColumn,

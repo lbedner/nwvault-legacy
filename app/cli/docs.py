@@ -5,10 +5,11 @@ Displays documentation URLs for installed components and services.
 
 from pathlib import Path
 
-import typer
-from app.i18n import lazy_t, t
 from rich.console import Console
 from rich.panel import Panel
+import typer
+
+from app.i18n import lazy_t, t
 
 app = typer.Typer(name="docs", help=lazy_t("docs.help"), invoke_without_command=True)
 console = Console()

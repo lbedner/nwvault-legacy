@@ -1,12 +1,13 @@
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
+from starlette import status
+
 from app.services.system import (
     DetailedHealthResponse,
     HealthResponse,
     get_system_status,
 )
-from fastapi import APIRouter, HTTPException
-from starlette import status
 
 router = APIRouter()
 

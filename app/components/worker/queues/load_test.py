@@ -7,7 +7,11 @@ patterns.
 
 from typing import Any
 
+from arq.connections import RedisSettings
+from arq.constants import result_key_prefix
+from arq.jobs import deserialize_result
 import redis.asyncio as aioredis
+
 from app.components.worker.events import publish_event
 from app.components.worker.tasks.load_tasks import (
     cpu_intensive_task,
@@ -20,9 +24,6 @@ from app.components.worker.tasks.system_tasks import (
 )
 from app.core.config import settings
 from app.core.log import logger
-from arq.connections import RedisSettings
-from arq.constants import result_key_prefix
-from arq.jobs import deserialize_result
 
 
 class WorkerSettings:

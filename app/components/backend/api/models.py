@@ -8,7 +8,9 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
 from app.components.worker.constants import LoadTestTypes
+
 
 class TaskRequest(BaseModel):
     """Request model for enqueueing a background task."""

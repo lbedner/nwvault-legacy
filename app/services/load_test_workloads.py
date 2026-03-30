@@ -7,9 +7,9 @@ to remain thin and backend-agnostic.
 """
 
 import asyncio
+from datetime import datetime
 import hashlib
 import random
-from datetime import datetime
 from typing import Any, cast
 
 from app.core.log import logger

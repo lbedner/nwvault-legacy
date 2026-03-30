@@ -4,20 +4,19 @@ Pytest configuration and fixtures for test suite.
 Provides common fixtures and configuration for all tests.
 """
 
-import os
-import sys
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import Any, AsyncGenerator, Generator
+import sys
+from typing import Any
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine.base import Engine
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import Session, SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-
 
 # Add project root to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,18 +31,18 @@ def app() -> FastAPI:
 
 
 @pytest.fixture
-def client(app: FastAPI) -> Generator[TestClient, None, None]:
+def client(app: FastAPI) -> Generator[TestClient]:
     """Create a test client for the FastAPI app."""
     with TestClient(app) as test_client:
         yield test_client
 @pytest.fixture
 def client_with_db(
     app: FastAPI, db_session: Session
-) -> Generator[TestClient, None, None]:
+) -> Generator[TestClient]:
     """Create a test client with database dependency override."""
     from app.components.backend.api.deps import get_db
 
-    def get_test_db() -> Generator[Session, None, None]:
+    def get_test_db() -> Generator[Session]:
         yield db_session
 
     app.dependency_overrides[get_db] = get_test_db
@@ -86,7 +85,7 @@ def engine() -> Engine:
 
 
 @pytest.fixture(scope="function")
-def db_session(engine: Engine) -> Generator[Session, None, None]:
+def db_session(engine: Engine) -> Generator[Session]:
     """
     Provide transactional database session with automatic rollback.
 
@@ -139,7 +138,7 @@ async def async_engine():
 
 
 @pytest.fixture(scope="function")
-async def async_db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
+async def async_db_session(async_engine) -> AsyncGenerator[AsyncSession]:
     """
     Provide async transactional database session with automatic rollback.
 
@@ -166,11 +165,11 @@ async def async_db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def async_client_with_db(
     app: FastAPI, async_db_session: AsyncSession
-) -> AsyncGenerator[TestClient, None]:
+) -> AsyncGenerator[TestClient]:
     """Create a test client with async database dependency override."""
     from app.components.backend.api.deps import get_async_db
 
-    async def get_test_async_db() -> AsyncGenerator[AsyncSession, None]:
+    async def get_test_async_db() -> AsyncGenerator[AsyncSession]:
         yield async_db_session
 
     app.dependency_overrides[get_async_db] = get_test_async_db
@@ -180,6 +179,5 @@ async def async_client_with_db(
 
     # Clean up dependency override
     app.dependency_overrides.clear()
-
 
 

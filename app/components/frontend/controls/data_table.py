@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import flet as ft
+
 from app.components.frontend.controls.text import BodyText, PrimaryText, SecondaryText
 from app.components.frontend.theme import AegisTheme as Theme
 

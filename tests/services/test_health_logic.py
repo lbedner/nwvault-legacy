@@ -5,9 +5,7 @@ These tests focus on the pure logic of health checking, warning propagation,
 and component hierarchy without external dependencies like Redis or system metrics.
 """
 
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any
 
 import pytest
 
@@ -15,7 +13,6 @@ from app.services.system import ComponentStatus, ComponentStatusType
 from app.services.system.health import (
     get_system_status,
 )
-
 
 
 class TestHealthUtilityFunctions:
@@ -553,10 +550,10 @@ class TestDatabaseHealthCheck:
     @pytest.mark.asyncio
     async def test_database_health_check_import_error(self) -> None:
         """Test database health check when db module not available."""
-        from app.services.system.health import check_database_health
-
         # Mock ImportError when trying to import db_session from app.core.db
         import builtins
+
+        from app.services.system.health import check_database_health
         real_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):

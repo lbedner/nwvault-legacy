@@ -10,14 +10,15 @@ This system automatically discovers and registers:
 Just drop files in the appropriate folders - no central registration required.
 """
 
+from collections.abc import Callable
 import importlib
 import inspect
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from app.core.log import logger
 from fastapi import FastAPI
+
+from app.core.log import logger
 
 
 class BackendHooks:

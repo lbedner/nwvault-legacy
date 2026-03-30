@@ -8,6 +8,8 @@ No inheritance or ABC complexity - just common functionality extracted.
 from collections.abc import Callable
 
 import flet as ft
+import logfire
+
 from app.components.frontend.controls import (
     H3Text,
     LabelText,
@@ -431,6 +433,7 @@ def create_progress_indicator(
         padding=ft.padding.symmetric(horizontal=12, vertical=8),
         expand=True,
     )
+@logfire.instrument("overseer.modal.create {component_name}")
 def create_modal_for_component(
     component_name: str, component_data: ComponentStatus, page: ft.Page
 ) -> ft.Container | None:
@@ -449,6 +452,9 @@ def create_modal_for_component(
         BackendDetailDialog,
         DatabaseDetailDialog,
         FrontendDetailDialog,
+        IngressDetailDialog,
+        ObservabilityDetailDialog,
+        OllamaDetailDialog,
         RedisDetailDialog,
         WorkerDetailDialog,
     )
@@ -457,6 +463,9 @@ def create_modal_for_component(
         "backend": BackendDetailDialog,
         "database": DatabaseDetailDialog,
         "frontend": FrontendDetailDialog,
+        "ingress": IngressDetailDialog,
+        "observability": ObservabilityDetailDialog,
+        "ollama": OllamaDetailDialog,
         "redis": RedisDetailDialog,
         "worker": WorkerDetailDialog,
     }
@@ -466,6 +475,7 @@ def create_modal_for_component(
         return modal_class(component_data, page)
 
     return None
+@logfire.instrument("overseer.modal.open {component_name}")
 def _open_modal(
     component_name: str, component_data: ComponentStatus, page: ft.Page
 ) -> None:

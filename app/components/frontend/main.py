@@ -15,29 +15,19 @@ from app.services.system.models import ComponentStatus, ComponentStatusType
 
 from .dashboard.activity_feed import ActivityFeed
 from .dashboard.cards import (
-
-
-
-
     DatabaseCard,
-
-
-
-
-
+    IngressCard,
+    ObservabilityCard,
+    OllamaCard,
     RedisCard,
-
-
     ServerCard,
-
-
     WorkerCard,
-
 )
 from .dashboard.cards.card_utils import create_health_status_indicator
 from .dashboard.diagram import DiagramView
 from .dashboard.status_overview import StatusOverviewPanel
-from .theme import AegisTheme as Theme, ThemeManager
+from .theme import AegisTheme as Theme
+from .theme import ThemeManager
 
 # Constants for health system grouping
 COMPONENTS_GROUP_KEY = "components"
@@ -734,7 +724,16 @@ def create_frontend_app() -> Callable[[ft.Page], Awaitable[None]]:
                     return DatabaseCard(component_data).build()
 
 
+                elif component_name == "ingress":
+                    return IngressCard(component_data).build()
 
+
+                elif component_name == "observability":
+                    return ObservabilityCard(component_data).build()
+
+
+                elif component_name == "ollama":
+                    return OllamaCard(component_data).build()
 
 
 

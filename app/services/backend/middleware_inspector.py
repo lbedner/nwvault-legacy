@@ -47,7 +47,7 @@ class FastAPIMiddlewareInspector:
             total_middleware = len(middleware_stack)
             security_middleware = self._identify_security_middleware(middleware_stack)
             security_count = len(security_middleware)
-            
+
             return MiddlewareMetadata(
                 middleware_stack=middleware_stack,
                 total_middleware=total_middleware,
@@ -58,7 +58,7 @@ class FastAPIMiddlewareInspector:
         except Exception as e:
             logger.error(f"Failed to extract middleware metadata: {e}")
             return self._get_fallback_metadata(str(e))
-    
+
     def _extract_middleware_info_from_middleware_item(
         self, middleware_item: Any, order: int
     ) -> MiddlewareInfo | None:
@@ -121,7 +121,7 @@ class FastAPIMiddlewareInspector:
             is_security = self._is_security_middleware(
                 middleware_type, middleware_module
             )
-            
+
             return MiddlewareInfo(
                 type=middleware_type,
                 module=middleware_module,
@@ -169,7 +169,7 @@ class FastAPIMiddlewareInspector:
                 config.update({
                     "csp": getattr(middleware, 'csp', {}),
                 })
-            
+
         except Exception as e:
             logger.debug(f"Could not extract config from {type(middleware)}: {e}")
 
@@ -183,17 +183,17 @@ class FastAPIMiddlewareInspector:
             'cors', 'auth', 'jwt', 'rate', 'security', 'limit', 'csrf', 'xss'
         ]
         security_modules = ['starlette.middleware.cors', 'fastapi.middleware.cors']
-        
+
         # Check type name for security keywords
         type_lower = middleware_type.lower()
         if any(keyword in type_lower for keyword in security_keywords):
             return True
-        
+
         # Check module name for security patterns
         module_lower = middleware_module.lower()
         if any(keyword in module_lower for keyword in security_keywords):
             return True
-        
+
         # Check for known security middleware modules
         if middleware_module in security_modules:
             return True
@@ -203,7 +203,7 @@ class FastAPIMiddlewareInspector:
     def _identify_security_middleware(self, stack: list[MiddlewareInfo]) -> list[str]:
         """Identify security-related middleware types."""
         return [mw.type for mw in stack if mw.is_security]
-    
+
     def _get_fallback_metadata(self, error: str) -> MiddlewareMetadata:
         """Return fallback metadata when introspection fails."""
         return MiddlewareMetadata(

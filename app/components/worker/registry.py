@@ -55,8 +55,8 @@ def discover_worker_queues() -> list[str]:
     queues = []
 
     for file in queue_files:
-        # Skip __init__.py and other special files
-        if file.stem not in ["__init__", "__pycache__"]:
+        # Skip __init__.py, __pycache__, and _private helper modules
+        if not file.stem.startswith("_"):
             # Verify the file has a WorkerSettings class
             try:
                 get_worker_settings(file.stem)

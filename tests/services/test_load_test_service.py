@@ -7,14 +7,15 @@ Tests business logic, data transformation, and analysis functions.
 import pickle
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic import ValidationError
 import pytest
+
 from app.components.worker.constants import LoadTestTypes
 from app.services.load_test import LoadTestConfiguration, LoadTestService
 from app.services.load_test_models import (
     LoadTestResult,
     PerformanceAnalysis,
 )
-from pydantic import ValidationError
 
 
 class TestLoadTestConfiguration:

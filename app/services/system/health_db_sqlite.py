@@ -15,7 +15,11 @@ from typing import Any
 from app.core.config import settings
 from app.core.log import logger
 from app.services.system.health import format_bytes
-from app.services.system.models import ComponentStatus, ComponentStatusType, MigrationInfo
+from app.services.system.models import (
+    ComponentStatus,
+    ComponentStatusType,
+    MigrationInfo,
+)
 
 # Cache static data that doesn't change at runtime
 _pragma_cache: dict[str, Any] | None = None

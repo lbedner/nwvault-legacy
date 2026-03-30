@@ -6,6 +6,7 @@ including title, status badge, scrollable sections, and close button.
 """
 
 import flet as ft
+
 from app.components.frontend.controls import H2Text, SecondaryText, StatusTag
 from app.components.frontend.theme import AegisTheme as Theme
 from app.services.system.models import ComponentStatus, ComponentStatusType

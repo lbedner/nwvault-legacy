@@ -8,9 +8,9 @@ Usage: python -m app.cli.migrate_fix
 """
 
 
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
+import sys
 
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -20,9 +20,6 @@ from sqlmodel import SQLModel
 
 from app.core.db import engine
 from app.i18n import t
-
-
-
 
 
 def _sa_type_str(col_type: object) -> str:

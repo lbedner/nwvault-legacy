@@ -7,9 +7,10 @@ results, and analysis data.
 
 from typing import Any
 
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+
 from app.components.worker.constants import LoadTestTypes
 from app.core.config import get_load_test_queue
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 class LoadTestError(Exception):
@@ -187,7 +188,7 @@ class LoadTestResult(BaseModel):
     analysis: LoadTestAnalysis | None = Field(None, description="Performance analysis")
 
     @model_validator(mode="after")
-    def validate_status_consistency(self) -> "LoadTestResult":
+    def validate_status_consistency(self) -> LoadTestResult:
         """Validate status consistency with error field."""
         if self.status == "failed" and not self.error:
             raise ValueError("Failed status requires error message")

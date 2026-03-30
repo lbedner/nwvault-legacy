@@ -9,6 +9,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     ExpandArrow,

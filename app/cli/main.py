@@ -10,11 +10,11 @@ import inspect
 import sys
 from typing import TYPE_CHECKING
 
-import app.cli._i18n_click  # noqa: F401 — translate Click's built-in --help text
 import click
 import typer
 
 from app.cli import docs, health
+import app.cli._i18n_click  # noqa: F401 — translate Click's built-in --help text
 from app.i18n import detect_locale, lazy_t, set_locale, t
 from app.i18n.locales import AVAILABLE_LOCALES
 
@@ -53,6 +53,13 @@ def main_callback(
 # Register sub-commands
 app.add_typer(health.app, name="health")
 app.add_typer(docs.app, name="docs")
+
+# Register vault archive management commands
+try:
+    vault_module = importlib.import_module("app.cli.vault")
+    app.add_typer(vault_module.app, name="vault")
+except ImportError:
+    pass
 
 # Conditionally register load-test command if worker components are available
 try:
@@ -131,7 +138,7 @@ def main() -> None:
     except click.exceptions.Exit as e:
         # Normal exit requested (e.g., after showing error message)
         sys.exit(e.exit_code)
-    except SystemExit as e:
+    except SystemExit:
         # Re-raise system exits (normal exit codes)
         raise
 

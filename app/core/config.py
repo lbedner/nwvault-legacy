@@ -133,9 +133,26 @@ class Settings(BaseSettings):
 
 
 
+    # Observability (Logfire)
+    # Set LOGFIRE_TOKEN to enable sending traces to Logfire cloud
+    # Get a write token from https://logfire.pydantic.dev (Project Settings > Write Tokens)
+    LOGFIRE_TOKEN: str | None = None
+
+    # Read token for Logfire Query API (enables trace analytics in the Overseer dashboard)
+    # Get from: Project Settings > Read Tokens in Logfire
+    LOGFIRE_READ_TOKEN: str | None = None
+
+    # Logfire project URL for linking to the dashboard
+    # e.g. "https://logfire.pydantic.dev/myorg/myproject"
+    LOGFIRE_PROJECT_URL: str | None = None
 
 
 
+
+
+    # Traefik Ingress settings
+    TRAEFIK_API_URL: str = "http://traefik:8080"  # Docker service name
+    TRAEFIK_API_URL_LOCAL: str | None = None  # Override for local CLI usage
 
 
 
@@ -153,6 +170,31 @@ class Settings(BaseSettings):
 
 
 
+
+    @property
+    def traefik_api_url_effective(self) -> str:
+        """
+        Get effective Traefik API URL.
+
+        Prefers local override when not in Docker.
+        """
+        # If explicitly overridden for local use
+        if self.TRAEFIK_API_URL_LOCAL and not self.is_docker:
+            return self.TRAEFIK_API_URL_LOCAL
+
+        # Auto-translate Docker hostnames to localhost when running outside Docker
+        if not self.is_docker:
+            from urllib.parse import urlparse, urlunparse
+
+            parsed = urlparse(self.TRAEFIK_API_URL)
+            # Translate Docker-specific hostnames to localhost
+            if parsed.hostname == "traefik":
+                netloc = "localhost"
+                if parsed.port:
+                    netloc = f"{netloc}:{parsed.port}"
+                return urlunparse(parsed._replace(netloc=netloc))
+
+        return self.TRAEFIK_API_URL
 
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
@@ -222,4 +264,3 @@ def is_valid_queue(queue_name: str) -> bool:
     except ImportError:
         # Worker components not available, no queues are valid
         return False
-

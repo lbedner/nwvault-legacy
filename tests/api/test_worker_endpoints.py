@@ -10,8 +10,8 @@ validates the API contract.
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from httpx import ASGITransport, AsyncClient
 import pytest
-from httpx import AsyncClient, ASGITransport
 
 from app.integrations.main import create_integrated_app
 

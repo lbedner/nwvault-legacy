@@ -1,1 +1,26 @@
+# Production overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d
+#
+# Key differences from dev:
+#   - No code volume mounts (code is baked into the image)
+#   - Only essential ports exposed (80, 443)
+#   - No debug ports (no dashboard, no direct DB access)
 
+services:
+  webserver:
+    volumes: []  # Remove dev code mount - code is baked into the image
+    profiles:
+      - dev
+      - prod
+
+  redis:
+    ports: []  # No direct Redis access in production
+    profiles:
+      - dev
+      - prod
+
+
+  traefik:
+    ports:
+      - "80:80"
+      # No 8080 dashboard port exposed in production

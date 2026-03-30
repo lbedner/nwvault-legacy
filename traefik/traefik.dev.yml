@@ -1,0 +1,37 @@
+# Traefik Static Configuration — Local Development
+# No HTTPS redirect, no TLS, no Let's Encrypt
+
+api:
+  dashboard: true
+  insecure: true
+
+ping:
+  entryPoint: traefik
+
+entryPoints:
+  web:
+    address: ":80"
+    transport:
+      respondingTimeouts:
+        # Disable read timeout so WebSocket connections stay open indefinitely
+        readTimeout: "0s"
+  traefik:
+    address: ":8888"
+
+# Backend connection settings (Traefik → uvicorn)
+serversTransport:
+  forwardingTimeouts:
+    dialTimeout: "5s"
+    # Disable response header timeout for WebSocket upgrade requests
+    responseHeaderTimeout: "0s"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: nwvault-legacy_default
+
+log:
+  level: INFO
+
+accessLog: {}

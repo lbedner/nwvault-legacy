@@ -6,6 +6,7 @@ Combines FastAPI backend and Flet frontend into a single unified view.
 """
 
 import flet as ft
+
 from app.services.system.models import ComponentStatus
 
 from .card_container import CardContainer

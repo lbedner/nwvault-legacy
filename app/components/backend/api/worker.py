@@ -66,7 +66,7 @@ async def enqueue_task(task_request: TaskRequest) -> TaskResponse:
             },
         )
 
-    from app.core.config import is_valid_queue, get_available_queues
+    from app.core.config import get_available_queues, is_valid_queue
 
     if not is_valid_queue(task_request.queue_type):
         available_queues = get_available_queues()

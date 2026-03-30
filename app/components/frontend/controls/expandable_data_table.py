@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import flet as ft
+
 from app.components.frontend.controls.data_table import (
     DataTableColumn,
     get_alignment,

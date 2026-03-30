@@ -5,6 +5,7 @@ Modern tag UI control based on ee-toolset design.
 """
 
 import flet as ft
+
 from app.components.frontend.styles import FontConfig
 from app.components.frontend.theme import AegisTheme as Theme
 from app.services.system.models import ComponentStatusType

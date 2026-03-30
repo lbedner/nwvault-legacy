@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 import flet as ft
+
 from app.components.frontend.controls.buttons import (
     ElevatedCancelButton,
     ElevatedUpdateButton,

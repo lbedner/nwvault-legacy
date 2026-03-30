@@ -3,12 +3,13 @@
 
 from collections.abc import AsyncGenerator, Generator
 
-from app.core.db import AsyncSessionLocal, SessionLocal
 from sqlmodel import Session
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.db import AsyncSessionLocal, SessionLocal
 
-def get_db() -> Generator[Session, None, None]:
+
+def get_db() -> Generator[Session]:
     """
     Database dependency that provides a database session.
 
@@ -32,7 +33,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_db() -> AsyncGenerator[AsyncSession]:
     """
     Async database dependency that provides an async database session.
 

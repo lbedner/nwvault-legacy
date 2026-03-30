@@ -6,12 +6,11 @@ Tests publish_event, EventPublishMiddleware (TaskIQ only), and
 pure helper functions _format_eta and _compute_queue_values.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.components.worker.events import WORKER_EVENT_STREAM, publish_event
-
 
 # ---------------------------------------------------------------------------
 # Group 1: publish_event()
@@ -63,7 +62,9 @@ async def test_publish_event_swallows_redis_errors() -> None:
 # Group 3: _format_eta()
 # ---------------------------------------------------------------------------
 
-from app.components.frontend.dashboard.modals.worker_modal import _format_eta  # noqa: E402
+from app.components.frontend.dashboard.modals.worker_modal import (
+    _format_eta,  # noqa: E402
+)
 
 
 def test_format_eta_subsecond() -> None:

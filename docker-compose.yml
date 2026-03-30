@@ -22,8 +22,9 @@ services:
     <<: *app
     command:
       - webserver
-    ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+    volumes:
+      - ./archive:/code/archive:ro
+      - ./data:/code/data
     depends_on:
       redis:
         condition: service_healthy
@@ -32,6 +33,8 @@ services:
       - DOCKER_CONTAINER=1
       # Redis connection for health checks
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      # Logfire observability token
+      - LOGFIRE_TOKEN=${LOGFIRE_TOKEN:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health/"]
       interval: 30s
@@ -47,6 +50,22 @@ services:
         reservations:
           memory: 256M
           cpus: '0.25'
+    labels:
+      - "traefik.enable=true"
+      # Public router
+      - "traefik.http.routers.webserver.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.webserver.entrypoints=web"
+      - "traefik.http.routers.webserver.middlewares=webserver-retry"
+      - "traefik.http.services.webserver.loadbalancer.server.port=${PORT:-8000}"
+      # Retry middleware — retries WebSocket upgrade during uvicorn hot-reload
+      - "traefik.http.middlewares.webserver-retry.retry.attempts=5"
+      - "traefik.http.middlewares.webserver-retry.retry.initialinterval=2s"
+      # Admin paths - IP restricted (set ADMIN_IP_ALLOWLIST in .env)
+      - "traefik.http.routers.webserver-admin.rule=PathPrefix(`/dashboard`) || PathPrefix(`/docs`) || PathPrefix(`/redoc`) || PathPrefix(`/openapi.json`)"
+      - "traefik.http.routers.webserver-admin.entrypoints=web"
+      - "traefik.http.routers.webserver-admin.service=webserver"
+      - "traefik.http.routers.webserver-admin.middlewares=admin-ipallowlist,webserver-retry"
+      - "traefik.http.middlewares.admin-ipallowlist.ipallowlist.sourcerange=${ADMIN_IP_ALLOWLIST:-0.0.0.0/0}"
     profiles:
       - dev
       - prod
@@ -132,6 +151,34 @@ services:
           cpus: '0.25'
         reservations:
           memory: 256M
+          cpus: '0.1'
+    profiles:
+      - dev
+      - prod
+  # TRAEFIK REVERSE PROXY
+
+  traefik:
+    image: traefik:v3.6
+    hostname: traefik
+    environment:
+      - DOCKER_API_VERSION=1.44
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
           cpus: '0.1'
     profiles:
       - dev

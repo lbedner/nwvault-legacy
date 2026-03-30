@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 class RouteInfo(BaseModel):
     """Information about a single FastAPI route."""
-    
+
     path: str
     methods: list[str]
     name: str | None = None
@@ -27,7 +27,7 @@ class RouteInfo(BaseModel):
 
 class RouteMetadata(BaseModel):
     """Comprehensive route metadata for FastAPI application."""
-    
+
     routes: list[RouteInfo]
     total_routes: int
     total_endpoints: int
@@ -39,7 +39,7 @@ class RouteMetadata(BaseModel):
     deprecated_count: int = 0
     error: str | None = None
     fallback: bool = False
-    
+
     def model_dump_for_metadata(self) -> dict[str, Any]:
         """Convert to dict format suitable for ComponentStatus metadata."""
         return self.model_dump(mode='json')
@@ -58,14 +58,14 @@ class MiddlewareInfo(BaseModel):
 
 class MiddlewareMetadata(BaseModel):
     """Comprehensive middleware metadata for FastAPI application."""
-    
+
     middleware_stack: list[MiddlewareInfo]
     total_middleware: int
     security_middleware: list[str] = []
     security_count: int = 0
     error: str | None = None
     fallback: bool = False
-    
+
     def model_dump_for_metadata(self) -> dict[str, Any]:
         """Convert to dict format suitable for ComponentStatus metadata."""
         return self.model_dump(mode='json')

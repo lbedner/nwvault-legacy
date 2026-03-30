@@ -4,7 +4,9 @@ Unit tests for load test Pydantic models.
 Tests validation, constraints, and data transformation for all load test models.
 """
 
+from pydantic import ValidationError
 import pytest
+
 from app.components.worker.constants import LoadTestTypes
 from app.services.load_test_models import (
     LoadTestConfiguration,
@@ -17,7 +19,6 @@ from app.services.load_test_models import (
 from app.services.load_test_models import (
     LoadTestErrorModel as LoadTestError,
 )
-from pydantic import ValidationError
 
 
 class TestLoadTestConfiguration:

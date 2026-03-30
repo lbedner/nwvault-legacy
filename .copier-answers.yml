@@ -1,3 +1,4 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
 _commit: 0e30656ba4325d95a24e067334aaeace0a7164b6
 _src_path: gh:lbedner/aegis-stack
 _template_version: 0.6.7
@@ -30,3 +31,5 @@ scheduler_backend: memory
 scheduler_with_persistence: false
 version: 0.1.0
 worker_backend: arq
+include_observability: true
+include_ingress: true

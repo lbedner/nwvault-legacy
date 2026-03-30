@@ -6,6 +6,7 @@ Uses DataTable for consistent styling with other tables in the app.
 """
 
 import flet as ft
+
 from app.components.frontend.controls import DataTable, DataTableColumn
 from app.services.system.models import ComponentStatus
 from app.services.system.ui import get_component_subtitle

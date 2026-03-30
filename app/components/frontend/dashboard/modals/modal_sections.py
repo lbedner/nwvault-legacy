@@ -16,6 +16,7 @@ import contextlib
 from typing import Any
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     H3Text,
@@ -533,7 +534,7 @@ class LifecycleInspector(ft.Container):
                 self._selected_card.set_selected(False)
             self._selected_card = None
 
-    def select_card(self, card: "LifecycleCard") -> None:
+    def select_card(self, card: LifecycleCard) -> None:
         """Select a card and update inspector."""
         # Deselect previous (guard against unmounted cards)
         if self._selected_card:

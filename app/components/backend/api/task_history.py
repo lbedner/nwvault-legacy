@@ -7,7 +7,9 @@ written by the task_history module.
 
 from typing import Any
 
+from fastapi import APIRouter, HTTPException
 import redis.asyncio as aioredis
+
 from app.components.backend.api.models import (
     TaskHistoryListResponse,
     TaskHistoryRecord,
@@ -19,7 +21,6 @@ from app.components.worker.task_history import (
 )
 from app.core.config import settings
 from app.core.log import logger
-from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/tasks/history", tags=["task-history"])
 

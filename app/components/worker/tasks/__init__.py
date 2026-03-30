@@ -19,6 +19,12 @@ from .load_tasks import (
 from .system_tasks import (
     load_test_orchestrator,
 )
+from .vault_tasks import (
+    download_category,
+    download_xml_data,
+    fix_html_category,
+    import_category,
+)
 
 # All task functions available to arq workers
 TASK_FUNCTIONS: list[Callable[..., Any]] = [
@@ -29,6 +35,11 @@ TASK_FUNCTIONS: list[Callable[..., Any]] = [
     io_simulation_task,
     memory_operations_task,
     failure_testing_task,
+    # Vault archive tasks
+    download_xml_data,
+    import_category,
+    download_category,
+    fix_html_category,
 ]
 
 
@@ -112,7 +123,11 @@ def get_queue_for_task(task_name: str) -> str:
         "io_simulation_task": "load_test",
         "memory_operations_task": "load_test",
         "failure_testing_task": "load_test",
-        # Future system and media tasks would go here
+        # Vault archive tasks
+        "download_xml_data": "vault_download",
+        "download_category": "vault_download",
+        "import_category": "vault_import",
+        "fix_html_category": "vault_fix",
     }
 
     return task_queue_map.get(

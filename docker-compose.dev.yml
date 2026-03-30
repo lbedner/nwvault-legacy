@@ -24,6 +24,11 @@ services:
     ports:
       - "6379:6379"
 
+  traefik:
+    ports:
+      - "80:80"
+      - "8888:8888"  # Dashboard
+
   test_runner:
     volumes:
       - .:/code

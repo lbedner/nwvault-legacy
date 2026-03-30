@@ -69,3 +69,7 @@ docs/_build/
 .cache/
 .mypy_cache/
 .ruff_cache/
+
+# Archive (mounted as volume, not baked into image)
+archive/
+data/

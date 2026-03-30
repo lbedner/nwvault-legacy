@@ -9,8 +9,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 import os
-from pathlib import Path
-import re
 import sys
 from typing import Any, cast
 
@@ -755,13 +753,13 @@ async def check_cache_health() -> ComponentStatus:
             logger.warning(f"Failed to get CLIENT LIST: {e}")
 
         await redis_info_client.aclose()
-        
+
         # Calculate derived metrics
         keyspace_hits = stats_info.get('keyspace_hits', 0)
         keyspace_misses = stats_info.get('keyspace_misses', 0)
         total_keyspace_ops = keyspace_hits + keyspace_misses
         hit_rate = (keyspace_hits / max(total_keyspace_ops, 1)) * 100
-        
+
         # Extract total keys from all databases
         total_keys = 0
         keys_with_expiry = 0
@@ -771,12 +769,12 @@ async def check_cache_health() -> ComponentStatus:
                 if isinstance(value, dict):
                     total_keys += value.get('keys', 0)
                     keys_with_expiry += value.get('expires', 0)
-        
+
         # Memory usage calculations
         used_memory = memory_info.get('used_memory', 0)
         used_memory_peak = memory_info.get('used_memory_peak', 0)
         mem_fragmentation_ratio = memory_info.get('mem_fragmentation_ratio', 1.0)
-        
+
         return ComponentStatus(
             name="cache",
             status=ComponentStatusType.HEALTHY,
@@ -787,17 +785,17 @@ async def check_cache_health() -> ComponentStatus:
                 "version": info.get("redis_version", "unknown"),
                 "url": redis_url,
                 "db": settings.REDIS_DB,
-                
+
                 # Connection and client metrics
                 "connected_clients": clients_info.get("connected_clients", 0),
                 "blocked_clients": clients_info.get("blocked_clients", 0),
                 "client_longest_output_list": clients_info.get(
                     "client_longest_output_list", 0
                 ),
-                
+
                 # Server uptime
                 "uptime_in_seconds": info.get("uptime_in_seconds", 0),
-                
+
                 # Memory metrics
                 "used_memory": used_memory,
                 "used_memory_human": memory_info.get("used_memory_human", "unknown"),
@@ -808,7 +806,7 @@ async def check_cache_health() -> ComponentStatus:
                 "mem_fragmentation_ratio": mem_fragmentation_ratio,
                 "maxmemory": memory_info.get("maxmemory", 0),
                 "maxmemory_human": memory_info.get("maxmemory_human", "0B"),
-                
+
                 # Performance and cache metrics
                 "instantaneous_ops_per_sec": stats_info.get(
                     "instantaneous_ops_per_sec", 0
@@ -818,11 +816,11 @@ async def check_cache_health() -> ComponentStatus:
                 "hit_rate_percent": hit_rate,
                 "evicted_keys": stats_info.get("evicted_keys", 0),
                 "expired_keys": stats_info.get("expired_keys", 0),
-                
+
                 # Keyspace statistics
                 "total_keys": total_keys,
                 "keys_with_expiry": keys_with_expiry,
-                
+
                 # Additional useful stats
                 "total_commands_processed": stats_info.get(
                     "total_commands_processed", 0
@@ -858,8 +856,8 @@ async def check_cache_health() -> ComponentStatus:
             metadata={
                 "implementation": "redis",
                 "url": (
-                    settings.redis_url_effective 
-                    if hasattr(settings, 'redis_url_effective') 
+                    settings.redis_url_effective
+                    if hasattr(settings, 'redis_url_effective')
                     else settings.REDIS_URL
                 ),
                 "db": settings.REDIS_DB,
@@ -1243,3 +1241,545 @@ async def check_worker_health() -> ComponentStatus:
             sub_components={},
         )
 
+async def check_ollama_health() -> ComponentStatus:
+    """
+    Check Ollama server health and running models.
+
+    Returns:
+        ComponentStatus indicating Ollama infrastructure health with model info
+    """
+    try:
+        from app.services.ai.ollama import (
+            OLLAMA_DEFAULT_URL,
+            OllamaClient,
+        )
+
+        # Get Ollama URL from settings (uses effective URL for Docker/local auto-detection)
+        ollama_url = settings.ollama_base_url_effective
+
+        client = OllamaClient(base_url=ollama_url)
+
+        # Get comprehensive server status
+        server_status = await client.get_server_status()
+
+        if not server_status.available:
+            return ComponentStatus(
+                name="ollama",
+                status=ComponentStatusType.UNHEALTHY,
+                message="Ollama server not reachable",
+                response_time_ms=None,
+                metadata={
+                    "available": False,
+                    "base_url": ollama_url,
+                    "error": "Connection failed",
+                },
+            )
+
+        # Use Pydantic's model_dump for clean serialization
+        running_models_info = [
+            m.model_dump(include={"name", "size_vram_gb", "is_warm", "context_length", "details"})
+            for m in server_status.running_models
+        ]
+        installed_models_info = [
+            m.model_dump(include={"name", "size_gb", "details"})
+            for m in server_status.installed_models
+        ]
+
+        # Determine status based on server state
+        if server_status.running_models:
+            status = ComponentStatusType.HEALTHY
+            primary_model = server_status.running_models[0]
+            message = f"{primary_model.name} • {primary_model.size_vram_gb:.1f}GB VRAM • warm"
+        elif server_status.installed_models_count > 0:
+            status = ComponentStatusType.INFO
+            message = f"Ollama ready • {server_status.installed_models_count} models installed • none loaded"
+        else:
+            status = ComponentStatusType.WARNING
+            message = "Ollama running but no models installed"
+
+        return ComponentStatus(
+            name="ollama",
+            status=status,
+            message=message,
+            response_time_ms=None,
+            metadata={
+                "available": True,
+                "base_url": ollama_url,
+                "version": server_status.version,
+                "running_models": running_models_info,
+                "running_models_count": len(server_status.running_models),
+                "installed_models": installed_models_info,
+                "installed_models_count": server_status.installed_models_count,
+                "total_vram_gb": round(server_status.total_vram_gb, 2),
+            },
+        )
+
+    except ImportError:
+        return ComponentStatus(
+            name="ollama",
+            status=ComponentStatusType.UNHEALTHY,
+            message="Ollama client not available",
+            response_time_ms=None,
+            metadata={"error": "OllamaClient not installed"},
+        )
+    except Exception as e:
+        logger.error(f"Ollama health check failed: {e}")
+        return ComponentStatus(
+            name="ollama",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Ollama health check failed: {str(e)}",
+            response_time_ms=None,
+            metadata={"error": str(e)},
+        )
+
+async def check_observability_health() -> ComponentStatus:
+    """
+    Check Logfire observability status and query trace analytics.
+
+    Reports whether Logfire is configured, whether cloud sending is active,
+    and the service name being used. When LOGFIRE_READ_TOKEN is set, queries
+    the Logfire Query API for trace statistics (spans, exceptions, latency).
+
+    Returns:
+        ComponentStatus indicating observability configuration status
+    """
+    try:
+        import logfire
+
+        send_to_logfire = bool(settings.LOGFIRE_TOKEN)
+        read_token = settings.LOGFIRE_READ_TOKEN
+        project_url = settings.LOGFIRE_PROJECT_URL
+
+        if send_to_logfire:
+            status = ComponentStatusType.HEALTHY
+            message = "Logfire active (sending to cloud)"
+        else:
+            status = ComponentStatusType.INFO
+            message = "Logfire instrumented (cloud disabled -- no token)"
+
+        metadata: dict[str, Any] = {
+            "configured": True,
+            "send_to_logfire": send_to_logfire,
+            "service_name": settings.PROJECT_NAME,
+            "query_api_available": bool(read_token),
+            "project_url": project_url,
+            "logfire_version": logfire.VERSION,
+        }
+
+        # Query Logfire API for trace analytics when read token is available
+        if read_token:
+            trace_data = await _query_logfire_trace_data(read_token)
+            metadata.update(trace_data)
+
+        return ComponentStatus(
+            name="observability",
+            status=status,
+            message=message,
+            response_time_ms=None,
+            metadata=metadata,
+        )
+
+    except Exception as e:
+        logger.error(f"Observability health check failed: {e}")
+        return ComponentStatus(
+            name="observability",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Observability health check failed: {str(e)}",
+            response_time_ms=None,
+            metadata={"error": str(e)},
+        )
+
+
+# Cache for Logfire query results to avoid rate limiting
+# Free tier has per-minute AND per-hour limits
+_logfire_query_cache: dict[str, tuple[dict[str, Any], datetime]] = {}
+_logfire_last_attempt: datetime | None = None
+_LOGFIRE_CACHE_SECONDS = 120  # 2 minutes between successful queries (3 sub-queries per cycle)
+_LOGFIRE_RETRY_SECONDS = 300  # 5 minutes between retries on failure
+
+
+async def _query_logfire_trace_data(read_token: str) -> dict[str, Any]:
+    """
+    Query Logfire Query API for trace statistics over the last hour.
+
+    Results are cached for 5 minutes to avoid hitting rate limits.
+    On failure, backs off for 5 minutes and returns stale cached data.
+
+    Runs three lightweight queries concurrently:
+    1. Aggregate stats (span count, exceptions, avg/max duration, trace count)
+    2. Top 20 slowest span types
+    3. Recent exceptions
+
+    Args:
+        read_token: Logfire read token for API authentication
+
+    Returns:
+        Dict with trace analytics data for metadata
+    """
+    global _logfire_last_attempt
+
+    now = datetime.now(UTC)
+
+    # Check cache - return cached data if still fresh
+    if "logfire" in _logfire_query_cache:
+        cached_result, cached_time = _logfire_query_cache["logfire"]
+        age = (now - cached_time).total_seconds()
+        if age < _LOGFIRE_CACHE_SECONDS:
+            return cached_result
+
+    # Backoff - don't retry if we attempted recently (even if it failed)
+    if _logfire_last_attempt is not None:
+        since_last = (now - _logfire_last_attempt).total_seconds()
+        if since_last < _LOGFIRE_RETRY_SECONDS:
+            # Return stale cache if available
+            if "logfire" in _logfire_query_cache:
+                stale_result, _ = _logfire_query_cache["logfire"]
+                return stale_result
+            return {}
+
+    # Mark attempt time BEFORE querying to prevent concurrent retries
+    _logfire_last_attempt = now
+
+    try:
+        from logfire.experimental.query_client import AsyncLogfireQueryClient
+    except ImportError:
+        logger.warning("Logfire query client not available")
+        return {"query_error": "logfire query client not installed"}
+
+    result: dict[str, Any] = {}
+
+    try:
+        async with AsyncLogfireQueryClient(read_token=read_token) as client:
+            # Run all three queries concurrently
+            agg_task = asyncio.create_task(_query_aggregate_stats(client))
+            slow_task = asyncio.create_task(_query_slowest_spans(client))
+            exc_task = asyncio.create_task(_query_recent_exceptions(client))
+
+            agg_data = await agg_task
+            slow_data = await slow_task
+            exc_data = await exc_task
+
+        # Check for partial failures (None = sub-query failed)
+        all_succeeded = (
+            agg_data is not None
+            and slow_data is not None
+            and exc_data is not None
+        )
+
+        # Always assemble what we have (use defaults for failed sub-queries)
+        if agg_data is not None:
+            result.update(agg_data)
+        else:
+            result.update({
+                "total_spans": 0, "total_traces": 0, "exceptions": 0,
+                "avg_duration_ms": 0, "max_duration_ms": 0,
+            })
+        result["slowest_spans"] = slow_data if slow_data is not None else []
+        result["recent_exceptions"] = exc_data if exc_data is not None else []
+
+        if all_succeeded:
+            assert agg_data is not None and slow_data is not None  # for type narrowing
+            # All queries succeeded - cache the complete result
+            _logfire_query_cache["logfire"] = (result, now)
+            # Reset backoff on success so cache TTL controls refresh rate
+            _logfire_last_attempt = None
+            logger.info(
+                f"Logfire query refreshed: {agg_data.get('total_spans', 0)} spans, "
+                f"{agg_data.get('exceptions', 0)} exceptions, "
+                f"{len(slow_data)} slow spans"
+            )
+        else:
+            # Partial failure - log which queries failed, don't cache
+            failed = []
+            if agg_data is None:
+                failed.append("aggregate")
+            if slow_data is None:
+                failed.append("slowest_spans")
+            if exc_data is None:
+                failed.append("exceptions")
+            logger.warning(
+                f"Logfire partial query failure ({', '.join(failed)})"
+            )
+            # Prefer stale cache if it has richer data
+            if "logfire" in _logfire_query_cache:
+                stale_result, _ = _logfire_query_cache["logfire"]
+                return stale_result
+
+    except Exception as e:
+        logger.warning(f"Logfire query API error: {e}")
+        result["query_error"] = str(e)
+        # Return stale cache if available rather than empty data
+        if "logfire" in _logfire_query_cache:
+            stale_result, _ = _logfire_query_cache["logfire"]
+            return stale_result
+
+    return result
+
+
+async def _query_aggregate_stats(client: Any) -> dict[str, Any] | None:
+    """Query aggregate span stats for the last hour. Returns None on failure."""
+    try:
+        results = await client.query_json_rows(
+            sql="""
+                SELECT
+                    count(*) as total_spans,
+                    count(*) FILTER (WHERE is_exception) as exceptions,
+                    avg(duration) as avg_duration_sec,
+                    max(duration) as max_duration_sec,
+                    count(DISTINCT trace_id) as total_traces
+                FROM records
+                WHERE start_timestamp > now() - interval '1 hour'
+            """
+        )
+        rows = results.get("rows", [])
+        if rows:
+            row = rows[0]
+            avg_sec = row.get("avg_duration_sec") or 0
+            max_sec = row.get("max_duration_sec") or 0
+            return {
+                "total_spans": row.get("total_spans", 0),
+                "total_traces": row.get("total_traces", 0),
+                "exceptions": row.get("exceptions", 0),
+                "avg_duration_ms": round(float(avg_sec) * 1000, 1),
+                "max_duration_ms": round(float(max_sec) * 1000, 1),
+            }
+        logger.warning("Logfire aggregate stats query returned no rows")
+        return None
+    except Exception as e:
+        logger.warning(f"Logfire aggregate stats query failed: {e}")
+        return None
+
+
+async def _query_slowest_spans(client: Any) -> list[dict[str, Any]] | None:
+    """Query top 20 slowest span types for the last hour. Returns None on failure."""
+    try:
+        results = await client.query_json_rows(
+            sql="""
+                SELECT
+                    span_name,
+                    avg(duration) as avg_sec,
+                    max(duration) as max_sec,
+                    percentile_cont(0.95) WITHIN GROUP (ORDER BY duration) as p95_sec,
+                    count(*) as count,
+                    count(*) FILTER (WHERE is_exception) as errors,
+                    sum(duration) as total_sec
+                FROM records
+                WHERE start_timestamp > now() - interval '1 hour'
+                  AND duration IS NOT NULL
+                GROUP BY span_name
+                ORDER BY avg_sec DESC
+                LIMIT 20
+            """
+        )
+        rows = results.get("rows", [])
+        spans = []
+        for row in rows:
+            avg_sec = row.get("avg_sec") or 0
+            max_sec = row.get("max_sec") or 0
+            p95_sec = row.get("p95_sec") or 0
+            total_sec = row.get("total_sec") or 0
+            spans.append({
+                "name": row.get("span_name", "unknown"),
+                "avg_ms": round(float(avg_sec) * 1000, 1),
+                "max_ms": round(float(max_sec) * 1000, 1),
+                "p95_ms": round(float(p95_sec) * 1000, 1),
+                "count": row.get("count", 0),
+                "errors": row.get("errors", 0),
+                "total_ms": round(float(total_sec) * 1000, 1),
+            })
+        return spans
+    except Exception as e:
+        logger.warning(f"Logfire slowest spans query failed: {e}")
+        return None
+
+
+async def _query_recent_exceptions(client: Any) -> list[dict[str, Any]] | None:
+    """Query recent exceptions for the last 24 hours. Returns None on failure."""
+    try:
+        results = await client.query_json_rows(
+            sql="""
+                SELECT
+                    span_name,
+                    message,
+                    start_timestamp,
+                    exception_type,
+                    exception_message,
+                    exception_stacktrace,
+                    trace_id,
+                    service_name
+                FROM records
+                WHERE is_exception AND start_timestamp > now() - interval '24 hours'
+                ORDER BY start_timestamp DESC
+                LIMIT 200
+            """
+        )
+        exceptions = []
+        for row in results.get("rows", []):
+            exceptions.append({
+                "span_name": row.get("span_name", "unknown"),
+                "message": row.get("message", ""),
+                "timestamp": row.get("start_timestamp", ""),
+                "exception_type": row.get("exception_type", ""),
+                "exception_message": row.get("exception_message", ""),
+                "stacktrace": row.get("exception_stacktrace", ""),
+                "trace_id": row.get("trace_id", ""),
+                "service_name": row.get("service_name", ""),
+            })
+        return exceptions
+    except Exception as e:
+        logger.warning(f"Logfire recent exceptions query failed: {e}")
+        return None
+
+async def check_ingress_health() -> ComponentStatus:
+    """
+    Check Traefik reverse proxy health and configuration.
+
+    Returns:
+        ComponentStatus indicating Traefik infrastructure health with router info
+    """
+    try:
+        import httpx
+
+        # Traefik API endpoint (dashboard API)
+        traefik_api_url = settings.traefik_api_url_effective
+
+        async with httpx.AsyncClient(
+            timeout=settings.HEALTH_CHECK_TIMEOUT_SECONDS,
+        ) as client:
+            # Check Traefik health endpoint
+            try:
+                health_response = await client.get(f"{traefik_api_url}/ping")
+                traefik_available = health_response.status_code == 200
+            except Exception:
+                traefik_available = False
+
+            if not traefik_available:
+                return ComponentStatus(
+                    name="ingress",
+                    status=ComponentStatusType.UNHEALTHY,
+                    message="Traefik not reachable",
+                    response_time_ms=None,
+                    metadata={
+                        "available": False,
+                        "api_url": traefik_api_url,
+                        "error": "Connection failed",
+                    },
+                )
+
+            # Get Traefik version and overview
+            try:
+                version_response = await client.get(
+                    f"{traefik_api_url}/api/version"
+                )
+                if version_response.status_code == 200:
+                    version_data = version_response.json()
+                else:
+                    version_data = {}
+            except Exception:
+                version_data = {}
+
+            # Get HTTP routers
+            try:
+                routers_response = await client.get(
+                    f"{traefik_api_url}/api/http/routers"
+                )
+                if routers_response.status_code == 200:
+                    routers = routers_response.json()
+                else:
+                    routers = []
+            except Exception:
+                routers = []
+
+            # Get HTTP services
+            try:
+                services_response = await client.get(
+                    f"{traefik_api_url}/api/http/services"
+                )
+                if services_response.status_code == 200:
+                    services = services_response.json()
+                else:
+                    services = []
+            except Exception:
+                services = []
+
+            # Get entrypoints
+            try:
+                entrypoints_response = await client.get(
+                    f"{traefik_api_url}/api/entrypoints"
+                )
+                if entrypoints_response.status_code == 200:
+                    entrypoints = entrypoints_response.json()
+                else:
+                    entrypoints = []
+            except Exception:
+                entrypoints = []
+
+            # Count enabled routers and services
+            enabled_routers = [r for r in routers if r.get("status") == "enabled"]
+            enabled_services = [s for s in services if s.get("status") == "enabled"]
+
+            # Determine status based on configuration
+            if len(enabled_routers) == 0:
+                status = ComponentStatusType.WARNING
+                message = "Traefik running but no routers configured"
+            else:
+                status = ComponentStatusType.HEALTHY
+                message = (
+                    f"Traefik active: {len(enabled_routers)} routers, "
+                    f"{len(enabled_services)} services"
+                )
+
+            # Extract entrypoint info
+            entrypoint_info = []
+            for ep in entrypoints:
+                ep_name = ep.get("name", "unknown")
+                ep_addr = ep.get("address", "unknown")
+                entrypoint_info.append({"name": ep_name, "address": ep_addr})
+
+            # Extract router info (limited to first 10 for metadata)
+            router_info = []
+            for router in enabled_routers[:10]:
+                router_info.append({
+                    "name": router.get("name", "unknown"),
+                    "rule": router.get("rule", ""),
+                    "service": router.get("service", ""),
+                    "entryPoints": router.get("entryPoints", []),
+                    "tls": router.get("tls") is not None,
+                })
+
+            return ComponentStatus(
+                name="ingress",
+                status=status,
+                message=message,
+                response_time_ms=None,
+                metadata={
+                    "available": True,
+                    "api_url": traefik_api_url,
+                    "version": version_data.get("Version", "unknown"),
+                    "codename": version_data.get("Codename", ""),
+                    "total_routers": len(routers),
+                    "enabled_routers": len(enabled_routers),
+                    "total_services": len(services),
+                    "enabled_services": len(enabled_services),
+                    "entrypoints": entrypoint_info,
+                    "routers": router_info,
+                },
+            )
+
+    except ImportError:
+        return ComponentStatus(
+            name="ingress",
+            status=ComponentStatusType.UNHEALTHY,
+            message="HTTP client not available",
+            response_time_ms=None,
+            metadata={"error": "httpx not installed"},
+        )
+    except Exception as e:
+        logger.error(f"Ingress health check failed: {e}")
+        return ComponentStatus(
+            name="ingress",
+            status=ComponentStatusType.UNHEALTHY,
+            message=f"Ingress health check failed: {str(e)}",
+            response_time_ms=None,
+            metadata={"error": str(e)},
+        )

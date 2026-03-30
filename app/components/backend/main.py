@@ -1,6 +1,7 @@
+from fastapi import FastAPI
+
 from app.components.backend.api.routing import include_routers
 from app.components.backend.hooks import backend_hooks
-from fastapi import FastAPI
 
 # Store the configured FastAPI app instance for introspection
 _configured_app: FastAPI | None = None

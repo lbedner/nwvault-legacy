@@ -1,6 +1,7 @@
 """Patch Click's built-in --help option to use translated help text."""
 
 import click.core
+
 from app.i18n import lazy_t
 
 _original_get_help_option = click.core.Command.get_help_option

@@ -8,21 +8,14 @@ Includes proper session management with transaction handling and foreign key sup
 
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-
 from pathlib import Path
-
 from typing import Any
-
 from urllib.parse import urlparse
 
-
 from sqlalchemy import create_engine, event
-
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from sqlalchemy.pool import NullPool
-
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlmodel import Session, SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -109,7 +102,7 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 @contextmanager
-def db_session(autocommit: bool = True) -> Generator[Session, None, None]:
+def db_session(autocommit: bool = True) -> Generator[Session]:
     """
     Database session context manager with automatic transaction handling.
 
@@ -137,7 +130,7 @@ def db_session(autocommit: bool = True) -> Generator[Session, None, None]:
 
 
 @asynccontextmanager
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_session() -> AsyncGenerator[AsyncSession]:
     """
     Async database session context manager with automatic transaction handling.
 

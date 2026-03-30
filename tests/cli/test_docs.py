@@ -3,6 +3,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+from typer.testing import CliRunner
+
 from app.cli.docs import (
     AEGIS_BASE,
     COMPONENT_DOCS,
@@ -11,7 +13,6 @@ from app.cli.docs import (
     _format_docs_section,
     app,
 )
-from typer.testing import CliRunner
 
 runner = CliRunner()
 

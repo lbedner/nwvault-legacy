@@ -9,6 +9,7 @@ import contextlib
 import time
 
 import flet as ft
+
 from app.components.frontend.controls import (
     BodyText,
     DataTableColumn,
