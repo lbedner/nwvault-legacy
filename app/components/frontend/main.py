@@ -18,7 +18,6 @@ from .dashboard.cards import (
     DatabaseCard,
     IngressCard,
     ObservabilityCard,
-    OllamaCard,
     RedisCard,
     ServerCard,
     WorkerCard,
@@ -731,9 +730,6 @@ def create_frontend_app() -> Callable[[ft.Page], Awaitable[None]]:
                 elif component_name == "observability":
                     return ObservabilityCard(component_data).build()
 
-
-                elif component_name == "ollama":
-                    return OllamaCard(component_data).build()
 
 
 

@@ -21,7 +21,7 @@ COMPONENT_CONFIG: dict[str, dict[str, str]] = {
     "cache": {"name": "Cache", "modal_name": "redis"},
     "worker": {"name": "Worker", "modal_name": "worker"},
     "ingress": {"name": "Ingress", "modal_name": "ingress"},
-    "ollama": {"name": "Inference", "modal_name": "ollama"},
+
     "scheduler": {"name": "Scheduler", "modal_name": "scheduler"},
     "service_ai": {"name": "AI Service", "modal_name": "ai"},
     "service_auth": {"name": "Auth Service", "modal_name": "auth"},

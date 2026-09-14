@@ -258,6 +258,15 @@ def fix_html_file(html_path: Path) -> int:
 
     content = THUMB_PATTERN.sub(replace_thumb, content)
 
+    # Rewrite fms/Image.php links to open the fullres image directly
+    # Pattern: <a href="fms/Image.php?id=XXXXX"><img src="/vault/.../fullres.jpg">
+    content = re.sub(
+        r'href="(?:fms/Image\.php\?id=\d+)">'
+        r'(<img[^>]*src="([^"]+_fullres\.jpg)")',
+        lambda m: f'href="{m.group(2)}">{m.group(1)}',
+        content,
+    )
+
     # Rewrite View.php detail links to our archive routes
     def replace_detail(match: re.Match) -> str:
         nonlocal count

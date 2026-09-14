@@ -103,8 +103,7 @@ MESSAGES: dict[str, str] = {
     "health.msg.comms_none": "No communication providers configured",
     "health.msg.comms_partial": "Comms service partially configured",
     "health.msg.comms_ok": "Communications service fully configured",
-    "health.msg.ollama_not_reachable": "Ollama server not reachable",
-    "health.msg.ollama_no_models": "Ollama running but no models installed",
+
     "health.msg.worker_offline": "worker offline - no health check data",
     "health.msg.failed": "{count} failed ({pct}%)",
     # Queue descriptions

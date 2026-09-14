@@ -37,7 +37,7 @@ RADIAL_POSITIONS: dict[str, tuple[float, float]] = {
     "worker": (-0.45, -0.35),  # Upper-left
     "scheduler": (0.45, -0.35),  # Upper-right
     "database": (-0.50, 0.0),  # Left
-    "ollama": (0.50, 0.0),  # Right
+
     "cache": (-0.15, 0.30),  # Bottom-center-left
     "service_auth": (0.15, 0.30),  # Bottom-center-right
     "service_ai": (0.50, 0.25),  # Bottom-right
@@ -70,10 +70,6 @@ def get_connections(components: dict[str, ComponentStatus]) -> list[tuple[str, s
         if name != "backend" and name != "ingress":
             connections.append(("backend", name))
 
-    # Inference → AI Service
-    if "ollama" in components and "service_ai" in components:
-        connections.append(("ollama", "service_ai"))
-
     return connections
 
 
@@ -87,7 +83,7 @@ def calculate_tree_positions(
     - Ingress (Traefik) at top center - entry point
     - Backend (Server) below ingress
     - Infrastructure components in third row
-      (database, cache, worker, scheduler, ollama)
+      (database, cache, worker, scheduler)
     - Services in bottom row
 
     Args:

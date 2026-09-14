@@ -38,7 +38,7 @@ class WorkerSettings:
         conn_retry_delay=settings.REDIS_CONN_RETRY_DELAY,
     )
     queue_name = f"arq:queue:{QUEUE_NAME}"
-    max_jobs = 5
+    max_jobs = 20
     job_timeout = 300  # 5 min — fast per category
     keep_result = settings.WORKER_KEEP_RESULT_SECONDS
     max_tries = 2

@@ -454,7 +454,6 @@ def create_modal_for_component(
         FrontendDetailDialog,
         IngressDetailDialog,
         ObservabilityDetailDialog,
-        OllamaDetailDialog,
         RedisDetailDialog,
         WorkerDetailDialog,
     )
@@ -465,7 +464,7 @@ def create_modal_for_component(
         "frontend": FrontendDetailDialog,
         "ingress": IngressDetailDialog,
         "observability": ObservabilityDetailDialog,
-        "ollama": OllamaDetailDialog,
+
         "redis": RedisDetailDialog,
         "worker": WorkerDetailDialog,
     }

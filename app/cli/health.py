@@ -54,8 +54,7 @@ _HEALTH_MSG_EXACT: dict[str, str] = {
     "AI service is disabled": "health.msg.ai_disabled",
     "No communication providers configured": "health.msg.comms_none",
     "Communications service fully configured": "health.msg.comms_ok",
-    "Ollama server not reachable": "health.msg.ollama_not_reachable",
-    "Ollama running but no models installed": "health.msg.ollama_no_models",
+
     "worker offline - no health check data": "health.msg.worker_offline",
 }
 
