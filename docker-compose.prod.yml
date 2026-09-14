@@ -8,7 +8,9 @@
 
 services:
   webserver:
-    volumes: []  # Remove dev code mount - code is baked into the image
+    volumes:
+      - ./archive:/code/archive:ro
+      - ./data:/code/data
     profiles:
       - dev
       - prod

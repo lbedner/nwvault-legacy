@@ -103,8 +103,7 @@ MESSAGES: dict[str, str] = {
     "health.msg.comms_none": "未配置通信服务",
     "health.msg.comms_partial": "通信服务部分配置",
     "health.msg.comms_ok": "通信服务已全部配置",
-    "health.msg.ollama_not_reachable": "Ollama 服务器无法连接",
-    "health.msg.ollama_no_models": "Ollama 运行中但未安装模型",
+
     "health.msg.worker_offline": "Worker 离线——无健康检查数据",
     "health.msg.failed": "{count} 个失败（{pct}%）",
     # 队列描述

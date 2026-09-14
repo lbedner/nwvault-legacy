@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     # e.g. "https://logfire.pydantic.dev/myorg/myproject"
     LOGFIRE_PROJECT_URL: str | None = None
 
+    # OTEL span buffer limits (prevent unbounded memory growth on export failure)
+    OTEL_BSP_MAX_QUEUE_SIZE: int = 1024
+    OTEL_BSP_MAX_EXPORT_BATCH_SIZE: int = 256
+    OTEL_BSP_EXPORT_TIMEOUT: int = 10000  # ms
+    OTEL_BSP_SCHEDULE_DELAY: int = 5000  # ms
+
 
 
 

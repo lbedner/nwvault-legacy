@@ -9,7 +9,7 @@ from .database_modal import DatabaseDetailDialog
 from .frontend_modal import FrontendDetailDialog
 from .ingress_modal import IngressDetailDialog
 from .observability_modal import ObservabilityDetailDialog
-from .ollama_modal import OllamaDetailDialog
+
 from .redis_modal import RedisDetailDialog
 from .worker_modal import WorkerDetailDialog
 
@@ -19,7 +19,7 @@ __all__ = [
     "FrontendDetailDialog",
     "IngressDetailDialog",
     "ObservabilityDetailDialog",
-    "OllamaDetailDialog",
+
     "RedisDetailDialog",
     "WorkerDetailDialog",
 ]
